@@ -100,7 +100,7 @@ public class ApiTest {
     public static class Message {
         private String touser = "or0Ab6ivwmypESVp_bYuk92T6SvU";
         private String template_id = "mKhGjV7UAV7Se9_byoPrgRlNfgJac8ZAfLnK8hyGmTQ";
-        private String url = "https://github.com/fuzhengwei/openai-code-review-log/blob/master/2024-07-27/Wzpxr6j1JY9k.md";
+        private String url = "https://github.com/fuzhengwei/openai-code-review-log/blob/main/2024-07-27/Wzpxr6j1JY9k.md";
         private Map<String, Map<String, String>> data = new HashMap<>();
 
         public void put(String key, String value) {

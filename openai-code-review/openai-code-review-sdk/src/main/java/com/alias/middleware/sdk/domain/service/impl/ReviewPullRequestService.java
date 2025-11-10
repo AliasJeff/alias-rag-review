@@ -29,9 +29,11 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
     private String prNumber;   // 数字字符串
     private String baseRef;    // base 分支引用
     private String headRef;    // head 分支引用
+    private String model;      // 模型名称，默认使用 GLM_4_FLASH
 
     public ReviewPullRequestService(GitCommand gitCommand, IOpenAI openAI) {
         super(gitCommand, openAI);
+        this.model = ModelEnum.GLM_4_FLASH.getCode(); // 默认模型
     }
 
     public void setRepository(String repository) {
@@ -48,6 +50,24 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
 
     public void setHeadRef(String headRef) {
         this.headRef = headRef;
+    }
+
+    /**
+     * 设置使用的模型
+     *
+     * @param model 模型名称，例如 ModelEnum.GPT_4O.getCode() 或 ModelEnum.GLM_4_FLASH.getCode()
+     */
+    public void setModel(String model) {
+        this.model = model;
+    }
+
+    /**
+     * 设置使用的模型
+     *
+     * @param modelEnum 模型枚举
+     */
+    public void setModel(ModelEnum modelEnum) {
+        this.model = modelEnum.getCode();
     }
 
     /**
@@ -95,7 +115,7 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
     @Override
     protected String codeReview(String diffCode) throws Exception {
         ChatCompletionRequestDTO chatCompletionRequest = new ChatCompletionRequestDTO();
-        chatCompletionRequest.setModel(ModelEnum.GLM_4_FLASH.getCode());
+        chatCompletionRequest.setModel(this.model != null ? this.model : ModelEnum.GLM_4_FLASH.getCode());
         chatCompletionRequest.setMessages(new ArrayList<ChatCompletionRequestDTO.Prompt>() {
             private static final long serialVersionUID = -7988151926241837899L;
             {

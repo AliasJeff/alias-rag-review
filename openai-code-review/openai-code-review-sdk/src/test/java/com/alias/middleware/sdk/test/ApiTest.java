@@ -3,8 +3,9 @@ package com.alias.middleware.sdk.test;
 import org.junit.Test;
 
 import com.alias.middleware.sdk.infrastructure.openai.IOpenAI;
+import com.alias.middleware.sdk.domain.model.ModelEnum;
 import com.alias.middleware.sdk.domain.service.impl.ReviewPullRequestService;
-import com.alias.middleware.sdk.infrastructure.openai.impl.ChatGLM;
+import com.alias.middleware.sdk.infrastructure.openai.impl.OpenAI;
 import com.alias.middleware.sdk.infrastructure.git.GitCommand;
 import com.alias.middleware.sdk.types.utils.BearerTokenUtils;
 import com.alias.middleware.sdk.types.utils.GitHubPrUtils;
@@ -58,14 +59,17 @@ public class ApiTest {
                 System.getenv().getOrDefault("COMMIT_BRANCH", "main"),
                 System.getenv().getOrDefault("COMMIT_AUTHOR", "ci"),
                 System.getenv().getOrDefault("COMMIT_MESSAGE", "code review"));
-        IOpenAI openAI = new ChatGLM(
-                System.getenv().getOrDefault("CHATGLM_APIHOST",
-                        "https://open.bigmodel.cn/api/paas/v4/chat/completions"),
-                System.getenv("CHATGLM_APIKEYSECRET"));
+
+        // 使用 OpenAI GPT-4o
+        IOpenAI openAI = new OpenAI(
+                System.getenv().getOrDefault("OPENAI_APIHOST",
+                        "https://api.openai.com/v1/chat/completions"),
+                System.getenv("OPENAI_APIKEY"));
 
         // 执行 PR 代码审查
-        ReviewPullRequestService svc = new ReviewPullRequestService(gitCommand, openAI);
-        svc.exec(url, baseRef, headRef);
+        ReviewPullRequestService reviewPullRequestService = new ReviewPullRequestService(gitCommand, openAI);
+        reviewPullRequestService.setModel(ModelEnum.GPT_4O);
+        reviewPullRequestService.exec(url, baseRef, headRef);
     }
 
 }

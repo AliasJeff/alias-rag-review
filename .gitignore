@@ -30,6 +30,5 @@ dist/
 
 # Env
 .env
-.env.*
 
 

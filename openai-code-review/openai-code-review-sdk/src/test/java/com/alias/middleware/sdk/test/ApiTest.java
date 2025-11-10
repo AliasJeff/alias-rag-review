@@ -44,17 +44,17 @@ public class ApiTest {
     @Test
     public void test_reviewPullRequest() {
         String url = "https://github.com/AliasJeff/repo/pull/123";
-        // 1) 解析 PR URL
-        GitHubPrUtils.PrInfo info = GitHubPrUtils.parsePrUrl(url);
-
-        // 2) 组装依赖
+        String baseRef = "main";
+        String headRef = "feature-branch";
+        
+        // 组装依赖
         // 即便 PR 评论不再写日志仓库，GitCommand 仍用于生成 diff
         GitCommand gitCommand = new GitCommand(
                 // 以下参数用于旧的日志落库逻辑，这里给占位即可
                 System.getenv().getOrDefault("GITHUB_REVIEW_LOG_URI",
                         "https://github.com/AliasJeff/openai-code-review-log"),
                 System.getenv().getOrDefault("GITHUB_TOKEN", ""),
-                System.getenv().getOrDefault("COMMIT_PROJECT", info.repo),
+                System.getenv().getOrDefault("COMMIT_PROJECT", "repo"),
                 System.getenv().getOrDefault("COMMIT_BRANCH", "main"),
                 System.getenv().getOrDefault("COMMIT_AUTHOR", "ci"),
                 System.getenv().getOrDefault("COMMIT_MESSAGE", "code review"));
@@ -63,12 +63,9 @@ public class ApiTest {
                         "https://open.bigmodel.cn/api/paas/v4/chat/completions"),
                 System.getenv("CHATGLM_APIKEYSECRET"));
 
-        // 3) 执行 PR 代码审查
-        ReviewPullRequestService svc = new ReviewPullRequestService(
-                gitCommand, openAI);
-        svc.setRepository(info.repository);
-        svc.setPrNumber(info.prNumber);
-        svc.exec();
+        // 执行 PR 代码审查
+        ReviewPullRequestService svc = new ReviewPullRequestService(gitCommand, openAI);
+        svc.exec(url, baseRef, headRef);
     }
 
 }

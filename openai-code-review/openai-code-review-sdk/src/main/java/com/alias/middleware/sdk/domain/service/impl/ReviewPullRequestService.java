@@ -6,6 +6,7 @@ import com.alias.middleware.sdk.infrastructure.git.GitCommand;
 import com.alias.middleware.sdk.infrastructure.openai.IOpenAI;
 import com.alias.middleware.sdk.infrastructure.openai.dto.ChatCompletionRequestDTO;
 import com.alias.middleware.sdk.infrastructure.openai.dto.ChatCompletionSyncResponseDTO;
+import com.alias.middleware.sdk.types.utils.GitHubPrUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -26,6 +27,8 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
     // PR 相关配置由调用方设置，不从环境变量读取
     private String repository; // owner/repo
     private String prNumber;   // 数字字符串
+    private String baseRef;    // base 分支引用
+    private String headRef;    // head 分支引用
 
     public ReviewPullRequestService(GitCommand gitCommand, IOpenAI openAI) {
         super(gitCommand, openAI);
@@ -39,22 +42,54 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
         this.prNumber = prNumber;
     }
 
+    public void setBaseRef(String baseRef) {
+        this.baseRef = baseRef;
+    }
+
+    public void setHeadRef(String headRef) {
+        this.headRef = headRef;
+    }
+
+    /**
+     * 重载的 exec 方法，接收 PR URL、baseRef 和 headRef 作为参数
+     * 自动解析 URL 并设置相关参数，然后执行代码审查
+     *
+     * @param prUrl GitHub PR URL，格式：https://github.com/{owner}/{repo}/pull/{number}
+     * @param baseRef base 分支引用
+     * @param headRef head 分支引用
+     */
+    public void exec(String prUrl, String baseRef, String headRef) {
+        GitHubPrUtils.PrInfo info = GitHubPrUtils.parsePrUrl(prUrl);
+        this.setRepository(info.repository);
+        this.setPrNumber(info.prNumber);
+        this.setBaseRef(baseRef);
+        this.setHeadRef(headRef);
+        this.exec();
+    }
+
     @Override
     protected String getDiffCode() throws IOException, InterruptedException {
-        // 期望在 CI 场景下获取 PR 的 base/head
-        String baseRef = System.getenv("GITHUB_BASE_REF");
-        String headRef = System.getenv("GITHUB_HEAD_REF");
+        // 优先使用设置的字段值，如果没有设置则从环境变量读取
+        String base = this.baseRef;
+        String head = this.headRef;
+        
+        if (base == null || base.isEmpty()) {
+            base = System.getenv("GITHUB_BASE_REF");
+        }
+        if (head == null || head.isEmpty()) {
+            head = System.getenv("GITHUB_HEAD_REF");
+        }
 
-        if (baseRef == null || baseRef.isEmpty() || headRef == null || headRef.isEmpty()) {
+        if (base == null || base.isEmpty() || head == null || head.isEmpty()) {
             throw new RuntimeException("GITHUB_BASE_REF or GITHUB_HEAD_REF is empty");
         }
 
         // 确保本地有最新远端引用
-        execGit(new String[]{"git", "fetch", "origin", baseRef}, new File("."));
-        execGit(new String[]{"git", "fetch", "origin", headRef}, new File("."));
+        execGit(new String[]{"git", "fetch", "origin", base}, new File("."));
+        execGit(new String[]{"git", "fetch", "origin", head}, new File("."));
 
         // 使用三点语法获取 merge-base 到 head 的变更
-        return execGitAndCapture(new String[]{"git", "diff", "origin/" + baseRef + "...origin/" + headRef}, new File("."));
+        return execGitAndCapture(new String[]{"git", "diff", "origin/" + base + "...origin/" + head}, new File("."));
     }
 
     @Override

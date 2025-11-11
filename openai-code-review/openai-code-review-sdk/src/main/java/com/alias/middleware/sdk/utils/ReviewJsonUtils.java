@@ -34,7 +34,7 @@ public final class ReviewJsonUtils {
         // Handle fenced code blocks ```json ... ```
         int fenceStart = s.indexOf("```");
         if (fenceStart >= 0) {
-            int fenceEnd = s.indexOf("```", fenceStart + 3);
+            int fenceEnd = s.lastIndexOf("```");
             if (fenceEnd > fenceStart) {
                 String fenced = s.substring(fenceStart + 3, fenceEnd);
                 // Remove optional language hint like "json" or "JSON"

@@ -6,6 +6,7 @@ import com.alias.middleware.sdk.infrastructure.git.GitCommand;
 import com.alias.middleware.sdk.infrastructure.openai.IOpenAI;
 import com.alias.middleware.sdk.infrastructure.openai.dto.ChatCompletionRequestDTO;
 import com.alias.middleware.sdk.infrastructure.openai.dto.ChatCompletionSyncResponseDTO;
+import com.alias.middleware.sdk.utils.VCSUtils;
 import com.alias.middleware.sdk.utils.GitHubPrUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -123,8 +124,20 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
         logger.info("Submitting diff to LLM for review. model={}, diffSize={}", this.model != null ? this.model : ModelEnum.GPT_4O.getCode(), diffCode != null ? diffCode.length() : 0);
         final int MAX_PROMPT_CHARS = 180_000; // 粗略上限，避免超出供应商限制
         String safeDiff = diffCode == null ? "" : diffCode;
+        // 使用 VCSUtils 将 diff 解析为结构化对象，并以 JSON 形式传给模型
+        ObjectMapper mapper = new ObjectMapper();
+        String structuredJson;
+        try {
+            List<VCSUtils.FileChanges> files = VCSUtils.parseUnifiedDiff(safeDiff);
+            structuredJson = mapper.writeValueAsString(files);
+        } catch (Exception e) {
+            logger.warn("Failed to parse unified diff; fallback to raw diff. err={}", e.toString());
+            structuredJson = mapper.writeValueAsString(new ArrayList<>()); // 空数组占位，避免 null
+        }
         String basePrompt = ReviewPrompts.PR_REVIEW_PROMPT;
-        String mergedPrompt = basePrompt.replace("<Git diff>", safeDiff);
+        // 将占位符替换为结构化 JSON；如果调用方的提示词仍期望原始 diff，可在提示词中同时保留两个占位符
+        String mergedPrompt = basePrompt
+                .replace("<Git diff>", structuredJson);
         if (mergedPrompt.length() <= MAX_PROMPT_CHARS) {
             ChatCompletionRequestDTO chatCompletionRequest = new ChatCompletionRequestDTO();
             chatCompletionRequest.setModel(this.model != null ? this.model : ModelEnum.GPT_4O.getCode());
@@ -134,11 +147,11 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
                     add(new ChatCompletionRequestDTO.Prompt("user", mergedPrompt));
                 }
             });
-            logger.info("Request: {}", chatCompletionRequest);
+            logger.debug("Request: {}", chatCompletionRequest);
             ChatCompletionSyncResponseDTO completions = openAI.completions(chatCompletionRequest);
             ChatCompletionSyncResponseDTO.Message message = completions.getChoices().get(0).getMessage();
             logger.info("Received review response from LLM. contentSize={}", message != null && message.getContent() != null ? message.getContent().length() : 0);
-            logger.info("Review response: {}", message.getContent());
+            logger.debug("Review response: {}", message.getContent());
             return message.getContent();
         }
         logger.warn("Prompt too large for single request; chunked processing has been disabled.");
@@ -156,9 +169,7 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
             root = mapper.readTree(recommend);
         } catch (Exception parseErr) {
             logger.warn("LLM output is not pure JSON, attempting to extract JSON. err={}", parseErr.toString());
-            logger.info("recommend: {}", recommend);
             String cleaned = ReviewJsonUtils.extractJsonPayload(recommend);
-            logger.info("cleaned: {}", cleaned);
             root = mapper.readTree(cleaned);
         }
         Integer overallScore = ReviewJsonUtils.safeInt(root, "overall_score");

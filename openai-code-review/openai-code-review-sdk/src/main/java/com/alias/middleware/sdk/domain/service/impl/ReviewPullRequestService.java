@@ -10,9 +10,11 @@ import com.alias.middleware.sdk.types.utils.GitHubPrUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import com.alias.middleware.sdk.config.AppConfig;
+import com.alias.middleware.sdk.domain.prompt.ReviewPrompts;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.BufferedReader;
-import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
@@ -20,6 +22,8 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
 
 public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
 
@@ -103,11 +107,11 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
 
         // 确保本地有最新远端引用
         logger.info("Fetching refs from origin. base={}, head={}", base, head);
-        execGit(new String[]{"git", "fetch", "origin", base}, new File("."));
-        execGit(new String[]{"git", "fetch", "origin", head}, new File("."));
+        gitCommand.fetchRemoteRef("origin", base);
+        gitCommand.fetchRemoteRef("origin", head);
 
         // 使用三点语法获取 merge-base 到 head 的变更
-        String diff = execGitAndCapture(new String[]{"git", "diff", "origin/" + base + "...origin/" + head}, new File("."));
+        String diff = gitCommand.diffRemoteRefsThreeDot("origin", base, head);
         logger.info("Generated git diff between origin/{}...origin/{}. size={} bytes", base, head, diff != null ? diff.length() : 0);
         return diff;
     }
@@ -120,49 +124,84 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
         chatCompletionRequest.setMessages(new ArrayList<ChatCompletionRequestDTO.Prompt>() {
             private static final long serialVersionUID = -7988151926241837899L;
             {
-                add(new ChatCompletionRequestDTO.Prompt("user", "你是一位资深编程专家，拥有深厚的编程基础和广泛的技术栈知识。你的专长在于识别代码中的低效模式、安全隐患、以及可维护性问题，并能提出针对性的优化策略。你擅长以易于理解的方式解释复杂的概念，确保即使是初学者也能跟随你的指导进行有效改进。在提供优化建议时，你注重平衡性能、可读性、安全性、逻辑错误、异常处理、边界条件，以及可维护性方面的考量，同时尊重原始代码的设计意图。\n" +
-                        "你总是以鼓励和建设性的方式提出反馈，致力于提升团队的整体编程水平，详尽指导编程实践，雕琢每一行代码至臻完善。用户会将仓库代码分支修改代码给你，以git diff 字符串的形式提供，你需要根据变化的代码，帮忙review本段代码。然后你review内容的返回内容必须严格遵守下面我给你的格式，包括标题内容。\n" +
-                        "模板中的变量内容解释：\n" +
-                        "变量1是给review打分，分数区间为0~100分。\n" +
-                        "变量2 是code review发现的问题点，包括：可能的性能瓶颈、逻辑缺陷、潜在问题、安全风险、命名规范、注释、以及代码结构、异常情况、边界条件、资源的分配与释放等等\n" +
-                        "变量3是具体的优化修改建议。\n" +
-                        "变量4是你给出的修改后的代码。 \n" +
-                        "变量5是代码中的优点。\n" +
-                        "变量6是代码的逻辑和目的，识别其在特定上下文中的作用和限制\n" +
-                        "\n" +
-                        "必须要求：\n" +
-                        "1. 以精炼的语言、严厉的语气指出存在的问题。\n" +
-                        "2. 你的反馈内容必须使用严谨的markdown格式\n" +
-                        "3. 不要携带变量内容解释信息。\n" +
-                        "4. 有清晰的标题结构\n" +
-                        "返回格式严格如下：\n" +
-                        "# 项目： OpenAi 代码评审.\n" +
-                        "### \uD83D\uDE00代码评分：{变量1}\n" +
-                        "#### \uD83D\uDE00代码逻辑与目的：\n" +
-                        "{变量6}\n" +
-                        "#### ✅代码优点：\n" +
-                        "{变量5}\n" +
-                        "#### \uD83E\uDD14问题点：\n" +
-                        "{变量2}\n" +
-                        "#### \uD83C\uDFAF修改建议：\n" +
-                        "{变量3}\n" +
-                        "#### \uD83D\uDCBB修改后的代码：\n" +
-                        "{变量4}\n" +
-                        "`;代码如下:"));
-                add(new ChatCompletionRequestDTO.Prompt("user", diffCode));
+                String mergedPrompt = ReviewPrompts.PR_REVIEW_COPILOT_STYLE_SCORE_100
+                        .replace("<Git diff>", diffCode == null ? "" : diffCode);
+                add(new ChatCompletionRequestDTO.Prompt("user", mergedPrompt));
             }
         });
 
         ChatCompletionSyncResponseDTO completions = openAI.completions(chatCompletionRequest);
         ChatCompletionSyncResponseDTO.Message message = completions.getChoices().get(0).getMessage();
         logger.info("Received review response from LLM. contentSize={}", message != null && message.getContent() != null ? message.getContent().length() : 0);
+        logger.debug("Review response: {}", message.getContent());
         return message.getContent();
     }
 
     @Override
     protected String recordCodeReview(String recommend) throws Exception {
-        logger.info("Posting review comment to GitHub PR. repository={}, prNumber={}", this.repository, this.prNumber);
-        return postCommentToGithubPr(recommend);
+        logger.info("Posting review to GitHub PR. repository={}, prNumber={}", this.repository, this.prNumber);
+        // Expect LLM to return JSON content as specified by prompt. Attempt to parse.
+        ObjectMapper mapper = new ObjectMapper();
+        String prUrl = "https://github.com/" + this.repository + "/pull/" + this.prNumber;
+        JsonNode root;
+        try {
+            root = mapper.readTree(recommend);
+        } catch (Exception parseErr) {
+            logger.warn("LLM output is not pure JSON, attempting to extract JSON. err={}", parseErr.toString());
+            String cleaned = extractJsonPayload(recommend);
+            root = mapper.readTree(cleaned);
+        }
+        Integer overallScore = safeInt(root, "overall_score");
+        String summary = safeText(root, "summary");
+        String general = safeText(root, "general_review");
+        StringBuilder topBuilder = new StringBuilder();
+        if (overallScore != null) {
+            topBuilder.append("### 😀 整体评分\n").append("⭐️ ").append(overallScore).append("/100").append("\n\n");
+        }
+        topBuilder.append(buildTopLevelComment(summary, general));
+        String combinedTop = topBuilder.toString();
+        postCommentToGithubPr(combinedTop);
+
+        // Inline comments
+        JsonNode comments = root.get("comments");
+        if (comments != null && comments.isArray() && comments.size() > 0) {
+            // Ensure refs are fetched and resolve commit sha of head
+            gitCommand.fetchRemoteRef("origin", this.headRef);
+            String commitSha = gitCommand.getRemoteRefCommitSha("origin", this.headRef);
+            List<ReviewComment> reviewComments = new ArrayList<>();
+            Iterator<JsonNode> it = comments.elements();
+            while (it.hasNext()) {
+                JsonNode c = it.next();
+                String path = safeText(c, "path");
+                Integer line = safeInt(c, "line");
+                String confidence = safeText(c, "confidence");
+                String body = safeText(c, "body");
+                String suggestion = safeText(c, "suggestion");
+                if (path == null || line == null || line <= 0 || body == null || body.isEmpty()) {
+                    continue;
+                }
+                String fullBody = body;
+                if (confidence != null && !confidence.isEmpty()) {
+                    String confEmoji;
+                    if ("high".equalsIgnoreCase(confidence) || "high confidence".equalsIgnoreCase(confidence)) {
+                        confEmoji = "🔥";
+                    } else if ("low".equalsIgnoreCase(confidence) || "low confidence".equalsIgnoreCase(confidence)) {
+                        confEmoji = "⚠️";
+                    } else {
+                        confEmoji = "💡";
+                    }
+                    fullBody = "🔎 **Confidence:** " + confEmoji + " " + confidence + "\n\n" + fullBody;
+                }
+                if (suggestion != null && !suggestion.isEmpty()) {
+                    fullBody = fullBody + "\n\n```suggestion\n" + suggestion + "\n```";
+                }
+                reviewComments.add(new ReviewComment(path, "RIGHT", line, fullBody));
+            }
+            if (!reviewComments.isEmpty()) {
+                createPullRequestReview(commitSha, "AI Code Review inline comments", reviewComments);
+            }
+        }
+        return prUrl;
     }
 
     @Override
@@ -170,49 +209,7 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
         // TODO: not implemented
     }
 
-    private void execGit(String[] command, File directory) throws IOException, InterruptedException {
-        logger.info("Executing git command: {}", String.join(" ", command));
-        ProcessBuilder pb = new ProcessBuilder(command);
-        pb.directory(directory);
-        Process p = pb.start();
-        try (BufferedReader err = new BufferedReader(new InputStreamReader(p.getErrorStream()))) {
-            String line;
-            while ((line = err.readLine()) != null) {
-                logger.debug(line);
-            }
-        }
-        int exit = p.waitFor();
-        if (exit != 0) {
-            throw new RuntimeException("Git command failed: " + String.join(" ", command) + ", exit=" + exit);
-        }
-        logger.info("Git command finished successfully: {}", String.join(" ", command));
-    }
-
-    private String execGitAndCapture(String[] command, File directory) throws IOException, InterruptedException {
-        logger.info("Executing git command (capture): {}", String.join(" ", command));
-        ProcessBuilder pb = new ProcessBuilder(command);
-        pb.directory(directory);
-        Process p = pb.start();
-        StringBuilder out = new StringBuilder();
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                out.append(line).append("\n");
-            }
-        }
-        try (BufferedReader err = new BufferedReader(new InputStreamReader(p.getErrorStream()))) {
-            String line;
-            while ((line = err.readLine()) != null) {
-                logger.debug(line);
-            }
-        }
-        int exit = p.waitFor();
-        if (exit != 0) {
-            throw new RuntimeException("Git command failed: " + String.join(" ", command) + ", exit=" + exit);
-        }
-        logger.info("Git command (capture) finished successfully: {}", String.join(" ", command));
-        return out.toString();
-    }
+    // Removed file-based prompt loader; prompt is provided by ReviewPrompts class.
 
     private String postCommentToGithubPr(String body) throws Exception {
         String repo = this.repository;
@@ -253,6 +250,101 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
         return "https://github.com/" + repo + "/pull/" + this.prNumber;
     }
 
+    private void createPullRequestReview(String commitSha, String body, List<ReviewComment> comments) throws Exception {
+        String repo = this.repository;
+        String token = AppConfig.getInstance().requireString("github", "token");
+        if (repo == null || repo.isEmpty()) {
+            throw new RuntimeException("GITHUB_REPOSITORY is empty");
+        }
+        if (token == null || token.isEmpty()) {
+            throw new RuntimeException("GITHUB_TOKEN is empty");
+        }
+        if (this.prNumber == null || this.prNumber.isEmpty()) {
+            throw new RuntimeException("GITHUB_PR_NUMBER is empty");
+        }
+        String api = "https://api.github.com/repos/" + repo + "/pulls/" + this.prNumber + "/reviews";
+        StringBuilder sb = new StringBuilder();
+        sb.append("{");
+        sb.append("\"commit_id\":").append(toJsonString(commitSha)).append(",");
+        sb.append("\"body\":").append(toJsonString(body)).append(",");
+        sb.append("\"event\":\"COMMENT\",");
+        sb.append("\"comments\":[");
+        for (int i = 0; i < comments.size(); i++) {
+            ReviewComment c = comments.get(i);
+            sb.append("{")
+                    .append("\"path\":").append(toJsonString(c.path)).append(",")
+                    .append("\"side\":").append(toJsonString(c.side)).append(",")
+                    .append("\"line\":").append(c.line).append(",")
+                    .append("\"body\":").append(toJsonString(c.body))
+                    .append("}");
+            if (i < comments.size() - 1) sb.append(",");
+        }
+        sb.append("]}");
+        String payload = sb.toString();
+
+        logger.info("Creating PR review with {} comments. api={}", comments.size(), api);
+        URL url = new URL(api);
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+        conn.setRequestMethod("POST");
+        conn.setRequestProperty("Authorization", "Bearer " + token);
+        conn.setRequestProperty("Accept", "application/vnd.github+json");
+        conn.setRequestProperty("User-Agent", "alias-openai-code-review-sdk");
+        conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+        conn.setDoOutput(true);
+        try (OutputStream os = conn.getOutputStream()) {
+            os.write(payload.getBytes(StandardCharsets.UTF_8));
+        }
+        int code = conn.getResponseCode();
+        if (code / 100 != 2) {
+            String errMsg = readStreamSafely(conn.getErrorStream());
+            throw new RuntimeException("Create PR review failed, code=" + code + ", err=" + errMsg);
+        }
+        logger.info("PR review created successfully. code={}", code);
+    }
+
+    private String buildTopLevelComment(String summary, String generalReview) {
+        StringBuilder sb = new StringBuilder();
+        if (summary != null && !summary.isEmpty()) {
+            sb.append("### PR 变更摘要\n").append(summary).append("\n\n");
+        }
+        if (generalReview != null && !generalReview.isEmpty()) {
+            sb.append("### 综合审查\n").append(generalReview);
+        }
+        return sb.length() == 0 ? "AI 代码审查无可用摘要或综合意见。" : sb.toString();
+    }
+
+    private static String safeText(JsonNode node, String field) {
+        if (node == null) return null;
+        JsonNode n = node.get(field);
+        if (n == null || n.isNull()) return null;
+        String s = n.asText();
+        return (s != null && !s.trim().isEmpty()) ? s : null;
+    }
+
+    private static Integer safeInt(JsonNode node, String field) {
+        if (node == null) return null;
+        JsonNode n = node.get(field);
+        if (n == null || n.isNull()) return null;
+        try {
+            return n.asInt();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static final class ReviewComment {
+        final String path;
+        final String side; // "RIGHT" or "LEFT"
+        final int line;
+        final String body;
+        ReviewComment(String path, String side, int line, String body) {
+            this.path = path;
+            this.side = side;
+            this.line = line;
+            this.body = body;
+        }
+    }
+
     private String readStreamSafely(java.io.InputStream is) throws IOException {
         if (is == null) return "";
         try (BufferedReader br = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
@@ -289,6 +381,41 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
         }
         sb.append('"');
         return sb.toString();
+    }
+    
+    /**
+     * Extract a JSON object string from a potentially markdown-formatted LLM output.
+     * Handles ```json ... ``` fences and leading/trailing prose. Falls back to first {...} slice.
+     */
+    private String extractJsonPayload(String text) {
+        if (text == null) return "";
+        String s = text.trim();
+        // Handle fenced code blocks ```json ... ```
+        int fenceStart = s.indexOf("```");
+        if (fenceStart >= 0) {
+            int fenceEnd = s.indexOf("```", fenceStart + 3);
+            if (fenceEnd > fenceStart) {
+                String fenced = s.substring(fenceStart + 3, fenceEnd);
+                // Remove optional language hint like "json" or "JSON"
+                String trimmed = fenced.trim();
+                if (trimmed.regionMatches(true, 0, "json", 0, Math.min(4, trimmed.length()))) {
+                    trimmed = trimmed.substring(Math.min(4, trimmed.length())).trim();
+                }
+                return sliceFirstJsonObject(trimmed);
+            }
+        }
+        // No fences; try to slice first JSON object
+        return sliceFirstJsonObject(s);
+    }
+    
+    private String sliceFirstJsonObject(String s) {
+        int start = s.indexOf('{');
+        int end = s.lastIndexOf('}');
+        if (start >= 0 && end >= start) {
+            return s.substring(start, end + 1).trim();
+        }
+        // As a last resort, return original trimmed string
+        return s.trim();
     }
 }
 

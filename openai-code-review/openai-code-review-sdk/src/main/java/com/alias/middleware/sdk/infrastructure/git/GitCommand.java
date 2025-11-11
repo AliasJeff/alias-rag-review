@@ -111,4 +111,89 @@ public class GitCommand {
     public String getMessage() {
         return message;
     }
+
+    /**
+     * Fetch a specific ref from a remote (e.g. fetch 'main' from 'origin').
+     * This is used by PR review flow and intentionally named differently
+     * from existing 'diff()' to avoid ambiguity with the normal flow.
+     */
+    public void fetchRemoteRef(String remote, String ref) throws IOException, InterruptedException {
+        String[] command = new String[] {"git", "fetch", remote, ref};
+        logger.info("Executing git command: {}", String.join(" ", command));
+        ProcessBuilder pb = new ProcessBuilder(command);
+        pb.directory(new File("."));
+        Process p = pb.start();
+        try (BufferedReader err = new BufferedReader(new InputStreamReader(p.getErrorStream()))) {
+            String line;
+            while ((line = err.readLine()) != null) {
+                logger.debug(line);
+            }
+        }
+        int exit = p.waitFor();
+        if (exit != 0) {
+            throw new RuntimeException("Git command failed: " + String.join(" ", command) + ", exit=" + exit);
+        }
+        logger.info("Git command finished successfully: {}", String.join(" ", command));
+    }
+
+    /**
+     * Get diff output between two remote refs using three-dot syntax:
+     * git diff remote/base...remote/head
+     * This is for PR review flow and named distinctly from 'diff()'.
+     */
+    public String diffRemoteRefsThreeDot(String remote, String baseRef, String headRef) throws IOException, InterruptedException {
+        String[] command = new String[] {"git", "diff", remote + "/" + baseRef + "..."+ remote + "/" + headRef};
+        logger.info("Executing git command (capture): {}", String.join(" ", command));
+        ProcessBuilder pb = new ProcessBuilder(command);
+        pb.directory(new File("."));
+        Process p = pb.start();
+        StringBuilder out = new StringBuilder();
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                out.append(line).append("\n");
+            }
+        }
+        try (BufferedReader err = new BufferedReader(new InputStreamReader(p.getErrorStream()))) {
+            String line;
+            while ((line = err.readLine()) != null) {
+                logger.debug(line);
+            }
+        }
+        int exit = p.waitFor();
+        if (exit != 0) {
+            throw new RuntimeException("Git command failed: " + String.join(" ", command) + ", exit=" + exit);
+        }
+        logger.info("Git command (capture) finished successfully: {}", String.join(" ", command));
+        return out.toString();
+    }
+
+    /**
+     * Get the commit SHA for a fetched remote ref, e.g. origin/main.
+     * Prerequisite: the ref should have been fetched already.
+     */
+    public String getRemoteRefCommitSha(String remote, String ref) throws IOException, InterruptedException {
+        String fullRef = remote + "/" + ref;
+        String[] command = new String[] {"git", "rev-parse", fullRef};
+        logger.info("Executing git command (capture single line): {}", String.join(" ", command));
+        ProcessBuilder pb = new ProcessBuilder(command);
+        pb.directory(new File("."));
+        Process p = pb.start();
+        String sha;
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+            sha = reader.readLine();
+        }
+        try (BufferedReader err = new BufferedReader(new InputStreamReader(p.getErrorStream()))) {
+            String line;
+            while ((line = err.readLine()) != null) {
+                logger.debug(line);
+            }
+        }
+        int exit = p.waitFor();
+        if (exit != 0 || sha == null || sha.isEmpty()) {
+            throw new RuntimeException("Git command failed: " + String.join(" ", command) + ", exit=" + exit);
+        }
+        logger.info("Resolved {} to commit {}", fullRef, sha);
+        return sha;
+    }
 }

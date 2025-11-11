@@ -1,0 +1,19 @@
+spring:
+  application:
+    name: openai-code-review
+  profiles:
+    active: local
+chatglm:
+  apiHost: https://open.bigmodel.cn/api/paas/v4/chat/completions
+  apiKeySecret: ${CHATGLM_APIKEYSECRET:}
+openai:
+  apiHost: https://api.openai.com/v1/chat/completions
+  apiKey: ${OPENAI_APIKEY:}
+github:
+  reviewLogUri: ${GITHUB_REVIEW_LOG_URI:}
+  token: ${GITHUB_TOKEN:}
+commit:
+  project: ${COMMIT_PROJECT:}
+  branch: ${COMMIT_BRANCH:}
+  author: ${COMMIT_AUTHOR:}
+  message: ${COMMIT_MESSAGE:}

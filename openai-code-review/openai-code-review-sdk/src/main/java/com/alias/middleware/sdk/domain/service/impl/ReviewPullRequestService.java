@@ -9,6 +9,7 @@ import com.alias.middleware.sdk.infrastructure.openai.dto.ChatCompletionSyncResp
 import com.alias.middleware.sdk.types.utils.GitHubPrUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import com.alias.middleware.sdk.config.AppConfig;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -29,11 +30,11 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
     private String prNumber;   // 数字字符串
     private String baseRef;    // base 分支引用
     private String headRef;    // head 分支引用
-    private String model;      // 模型名称，默认使用 GLM_4_FLASH
+    private String model;      // 模型名称，默认使用 GPT-4o
 
     public ReviewPullRequestService(GitCommand gitCommand, IOpenAI openAI) {
         super(gitCommand, openAI);
-        this.model = ModelEnum.GLM_4_FLASH.getCode(); // 默认模型
+        this.model = ModelEnum.GPT_4O.getCode(); // 默认模型
     }
 
     public void setRepository(String repository) {
@@ -79,43 +80,43 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
      * @param headRef head 分支引用
      */
     public void exec(String prUrl, String baseRef, String headRef) {
+        logger.info("Starting PR review. prUrl={}, baseRef={}, headRef={}", prUrl, baseRef, headRef);
         GitHubPrUtils.PrInfo info = GitHubPrUtils.parsePrUrl(prUrl);
+        logger.info("Parsed PR URL. repository={}, prNumber={}", info.repository, info.prNumber);
         this.setRepository(info.repository);
         this.setPrNumber(info.prNumber);
         this.setBaseRef(baseRef);
         this.setHeadRef(headRef);
+        logger.info("Executing review for {}/pull/{} with base={} head={}", info.repository, info.prNumber, baseRef, headRef);
         this.exec();
     }
 
     @Override
     protected String getDiffCode() throws IOException, InterruptedException {
-        // 优先使用设置的字段值，如果没有设置则从环境变量读取
         String base = this.baseRef;
         String head = this.headRef;
-        
-        if (base == null || base.isEmpty()) {
-            base = System.getenv("GITHUB_BASE_REF");
-        }
-        if (head == null || head.isEmpty()) {
-            head = System.getenv("GITHUB_HEAD_REF");
-        }
 
         if (base == null || base.isEmpty() || head == null || head.isEmpty()) {
-            throw new RuntimeException("GITHUB_BASE_REF or GITHUB_HEAD_REF is empty");
+            logger.error("Base or head ref is empty. base='{}', head='{}'", base, head);
+            throw new RuntimeException("baseRef or headRef is empty; please set via exec(url, baseRef, headRef)");
         }
 
         // 确保本地有最新远端引用
+        logger.info("Fetching refs from origin. base={}, head={}", base, head);
         execGit(new String[]{"git", "fetch", "origin", base}, new File("."));
         execGit(new String[]{"git", "fetch", "origin", head}, new File("."));
 
         // 使用三点语法获取 merge-base 到 head 的变更
-        return execGitAndCapture(new String[]{"git", "diff", "origin/" + base + "...origin/" + head}, new File("."));
+        String diff = execGitAndCapture(new String[]{"git", "diff", "origin/" + base + "...origin/" + head}, new File("."));
+        logger.info("Generated git diff between origin/{}...origin/{}. size={} bytes", base, head, diff != null ? diff.length() : 0);
+        return diff;
     }
 
     @Override
     protected String codeReview(String diffCode) throws Exception {
+        logger.info("Submitting diff to LLM for review. model={}, diffSize={}", this.model != null ? this.model : ModelEnum.GPT_4O.getCode(), diffCode != null ? diffCode.length() : 0);
         ChatCompletionRequestDTO chatCompletionRequest = new ChatCompletionRequestDTO();
-        chatCompletionRequest.setModel(this.model != null ? this.model : ModelEnum.GLM_4_FLASH.getCode());
+        chatCompletionRequest.setModel(this.model != null ? this.model : ModelEnum.GPT_4O.getCode());
         chatCompletionRequest.setMessages(new ArrayList<ChatCompletionRequestDTO.Prompt>() {
             private static final long serialVersionUID = -7988151926241837899L;
             {
@@ -154,11 +155,13 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
 
         ChatCompletionSyncResponseDTO completions = openAI.completions(chatCompletionRequest);
         ChatCompletionSyncResponseDTO.Message message = completions.getChoices().get(0).getMessage();
+        logger.info("Received review response from LLM. contentSize={}", message != null && message.getContent() != null ? message.getContent().length() : 0);
         return message.getContent();
     }
 
     @Override
     protected String recordCodeReview(String recommend) throws Exception {
+        logger.info("Posting review comment to GitHub PR. repository={}, prNumber={}", this.repository, this.prNumber);
         return postCommentToGithubPr(recommend);
     }
 
@@ -168,6 +171,7 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
     }
 
     private void execGit(String[] command, File directory) throws IOException, InterruptedException {
+        logger.info("Executing git command: {}", String.join(" ", command));
         ProcessBuilder pb = new ProcessBuilder(command);
         pb.directory(directory);
         Process p = pb.start();
@@ -181,9 +185,11 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
         if (exit != 0) {
             throw new RuntimeException("Git command failed: " + String.join(" ", command) + ", exit=" + exit);
         }
+        logger.info("Git command finished successfully: {}", String.join(" ", command));
     }
 
     private String execGitAndCapture(String[] command, File directory) throws IOException, InterruptedException {
+        logger.info("Executing git command (capture): {}", String.join(" ", command));
         ProcessBuilder pb = new ProcessBuilder(command);
         pb.directory(directory);
         Process p = pb.start();
@@ -204,12 +210,13 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
         if (exit != 0) {
             throw new RuntimeException("Git command failed: " + String.join(" ", command) + ", exit=" + exit);
         }
+        logger.info("Git command (capture) finished successfully: {}", String.join(" ", command));
         return out.toString();
     }
 
     private String postCommentToGithubPr(String body) throws Exception {
-        String repo = this.repository; // 由调用方设置
-        String token = System.getenv("GITHUB_TOKEN");
+        String repo = this.repository;
+        String token = AppConfig.getInstance().requireString("github", "token");
         if (repo == null || repo.isEmpty()) {
             throw new RuntimeException("GITHUB_REPOSITORY is empty");
         }
@@ -224,6 +231,7 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
         String api = "https://api.github.com/repos/" + repo + "/issues/" + this.prNumber + "/comments";
         String payload = "{\"body\":" + toJsonString(body) + "}";
 
+        logger.info("Posting comment to GitHub. api={}, repo={}, pr={}", api, repo, this.prNumber);
         URL url = new URL(api);
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("POST");
@@ -241,6 +249,7 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
             throw new RuntimeException("GitHub comment failed, code=" + code + ", err=" + errMsg);
         }
         // 返回 PR 链接，便于日志打印
+        logger.info("Comment posted to GitHub PR successfully. code={}, url=https://github.com/{}/pull/{}", code, repo, this.prNumber);
         return "https://github.com/" + repo + "/pull/" + this.prNumber;
     }
 

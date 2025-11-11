@@ -9,22 +9,10 @@ import com.alias.middleware.sdk.infrastructure.openai.impl.OpenAI;
 import com.alias.middleware.sdk.infrastructure.git.GitCommand;
 import com.alias.middleware.sdk.types.utils.BearerTokenUtils;
 import com.alias.middleware.sdk.types.utils.GitHubPrUtils;
+import com.alias.middleware.sdk.config.AppConfig;
 
-import javax.annotation.Resource;
 
 public class ApiTest {
-
-    @Resource
-    private IOpenAI openAI;
-
-    @Resource
-    private ReviewPullRequestService reviewPullRequestService;
-
-    @Resource
-    private GitCommand gitCommand;
-
-    @Resource
-    private GitHubPrUtils gitHubPrUtils;
 
     @Test
     public void test_parsePrUrl() {
@@ -44,27 +32,28 @@ public class ApiTest {
 
     @Test
     public void test_reviewPullRequest() {
-        String url = "https://github.com/AliasJeff/repo/pull/123";
+        AppConfig cfg = AppConfig.getInstance();
         String baseRef = "main";
-        String headRef = "feature-branch";
-        
+        // NOTE: 手动填写 headRef
+        String headRef = "20251110-review-pull-request";
+        // NOTE: 手动填写 PR URL
+        String url = "https://github.com/AliasJeff/alias-rag-review/pull/1";
+
         // 组装依赖
         // 即便 PR 评论不再写日志仓库，GitCommand 仍用于生成 diff
         GitCommand gitCommand = new GitCommand(
                 // 以下参数用于旧的日志落库逻辑，这里给占位即可
-                System.getenv().getOrDefault("GITHUB_REVIEW_LOG_URI",
-                        "https://github.com/AliasJeff/openai-code-review-log"),
-                System.getenv().getOrDefault("GITHUB_TOKEN", ""),
-                System.getenv().getOrDefault("COMMIT_PROJECT", "repo"),
-                System.getenv().getOrDefault("COMMIT_BRANCH", "main"),
-                System.getenv().getOrDefault("COMMIT_AUTHOR", "ci"),
-                System.getenv().getOrDefault("COMMIT_MESSAGE", "code review"));
+                cfg.getString("github", "reviewLogUri"),
+                cfg.getString("github", "token"),
+                cfg.getString("commit", "project"),
+                cfg.getString("commit", "branch"),
+                cfg.getString("commit", "author"),
+                cfg.getString("commit", "message"));
 
         // 使用 OpenAI GPT-4o
         IOpenAI openAI = new OpenAI(
-                System.getenv().getOrDefault("OPENAI_APIHOST",
-                        "https://api.openai.com/v1/chat/completions"),
-                System.getenv("OPENAI_APIKEY"));
+                cfg.getString("openai", "apiHost"),
+                cfg.getString("openai", "apiKey"));
 
         // 执行 PR 代码审查
         ReviewPullRequestService reviewPullRequestService = new ReviewPullRequestService(gitCommand, openAI);

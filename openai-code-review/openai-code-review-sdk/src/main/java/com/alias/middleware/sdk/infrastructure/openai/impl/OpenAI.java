@@ -58,7 +58,7 @@ public class OpenAI implements IOpenAI {
             } finally {
                 connection.disconnect();
             }
-            throw new RuntimeException("OpenAI API request failed, code=" + responseCode + ", error=" + errorResponse.toString());
+            throw new RuntimeException("OpenAI API request failed, code=" + responseCode + ", error=" + errorResponse);
         }
 
         // 读取成功响应

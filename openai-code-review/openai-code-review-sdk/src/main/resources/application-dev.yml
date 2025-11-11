@@ -1,0 +1,23 @@
+server:
+  port: 8090
+
+spring:
+
+logging:
+  level:
+    root: info
+  config: classpath:logback-spring.xml
+chatglm:
+  apiHost: https://open.bigmodel.cn/api/paas/v4/chat/completions
+  apiKeySecret: ""
+openai:
+  apiHost: https://api.openai.com/v1/chat/completions
+  apiKey: ""
+github:
+  reviewLogUri: ""
+  token: ""
+commit:
+  project: "repo"
+  branch: "main"
+  author: "local"
+  message: "code review"

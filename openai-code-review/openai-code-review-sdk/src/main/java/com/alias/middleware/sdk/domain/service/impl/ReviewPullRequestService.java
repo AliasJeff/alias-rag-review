@@ -13,10 +13,10 @@ import com.alias.middleware.sdk.config.AppConfig;
 import com.alias.middleware.sdk.domain.prompt.ReviewPrompts;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.alias.middleware.sdk.utils.DiffLineMapper;
 import com.alias.middleware.sdk.utils.ReviewJsonUtils;
 import com.alias.middleware.sdk.utils.ReviewCommentUtils;
 import com.alias.middleware.sdk.utils.IoUtils;
+import com.alias.middleware.sdk.utils.SeverityUtils;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -121,22 +121,28 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
     @Override
     protected String codeReview(String diffCode) throws Exception {
         logger.info("Submitting diff to LLM for review. model={}, diffSize={}", this.model != null ? this.model : ModelEnum.GPT_4O.getCode(), diffCode != null ? diffCode.length() : 0);
-        ChatCompletionRequestDTO chatCompletionRequest = new ChatCompletionRequestDTO();
-        chatCompletionRequest.setModel(this.model != null ? this.model : ModelEnum.GPT_4O.getCode());
-        chatCompletionRequest.setMessages(new ArrayList<ChatCompletionRequestDTO.Prompt>() {
-            private static final long serialVersionUID = -7988151926241837899L;
-            {
-                String mergedPrompt = ReviewPrompts.PR_REVIEW_PROMPT
-                        .replace("<Git diff>", diffCode == null ? "" : diffCode);
-                add(new ChatCompletionRequestDTO.Prompt("user", mergedPrompt));
-            }
-        });
-
-        ChatCompletionSyncResponseDTO completions = openAI.completions(chatCompletionRequest);
-        ChatCompletionSyncResponseDTO.Message message = completions.getChoices().get(0).getMessage();
-        logger.info("Received review response from LLM. contentSize={}", message != null && message.getContent() != null ? message.getContent().length() : 0);
-        logger.debug("Review response: {}", message.getContent());
-        return message.getContent();
+        final int MAX_PROMPT_CHARS = 180_000; // 粗略上限，避免超出供应商限制
+        String safeDiff = diffCode == null ? "" : diffCode;
+        String basePrompt = ReviewPrompts.PR_REVIEW_PROMPT;
+        String mergedPrompt = basePrompt.replace("<Git diff>", safeDiff);
+        if (mergedPrompt.length() <= MAX_PROMPT_CHARS) {
+            ChatCompletionRequestDTO chatCompletionRequest = new ChatCompletionRequestDTO();
+            chatCompletionRequest.setModel(this.model != null ? this.model : ModelEnum.GPT_4O.getCode());
+            chatCompletionRequest.setMessages(new ArrayList<ChatCompletionRequestDTO.Prompt>() {
+                private static final long serialVersionUID = -7988151926241837899L;
+                {
+                    add(new ChatCompletionRequestDTO.Prompt("user", mergedPrompt));
+                }
+            });
+            logger.info("Request: {}", chatCompletionRequest);
+            ChatCompletionSyncResponseDTO completions = openAI.completions(chatCompletionRequest);
+            ChatCompletionSyncResponseDTO.Message message = completions.getChoices().get(0).getMessage();
+            logger.info("Received review response from LLM. contentSize={}", message != null && message.getContent() != null ? message.getContent().length() : 0);
+            logger.info("Review response: {}", message.getContent());
+            return message.getContent();
+        }
+        logger.warn("Prompt too large for single request; chunked processing has been disabled.");
+        throw new RuntimeException("Prompt too large for single request; please reduce diff size.");
     }
 
     @Override
@@ -150,7 +156,9 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
             root = mapper.readTree(recommend);
         } catch (Exception parseErr) {
             logger.warn("LLM output is not pure JSON, attempting to extract JSON. err={}", parseErr.toString());
+            logger.info("recommend: {}", recommend);
             String cleaned = ReviewJsonUtils.extractJsonPayload(recommend);
+            logger.info("cleaned: {}", cleaned);
             root = mapper.readTree(cleaned);
         }
         Integer overallScore = ReviewJsonUtils.safeInt(root, "overall_score");
@@ -167,16 +175,6 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
         // Inline comments
         JsonNode comments = root.get("comments");
         if (comments != null && comments.isArray() && comments.size() > 0) {
-            // Build diff index for head-side line validation/fix
-            String unifiedDiff;
-            DiffLineMapper.Index diffIndex = null;
-            try {
-                unifiedDiff = getDiffCode();
-                diffIndex = DiffLineMapper.index(unifiedDiff != null ? unifiedDiff : "");
-                logger.info("Diff index built for head line validation. validPaths={}", diffIndex != null ? "yes" : "no");
-            } catch (Exception e) {
-                logger.warn("Failed to build diff index; will skip line auto-fix. err={}", e.toString());
-            }
             // Ensure refs are fetched and resolve commit sha of head
             gitCommand.fetchRemoteRef("origin", this.headRef);
             String commitSha = gitCommand.getRemoteRefCommitSha("origin", this.headRef);
@@ -192,20 +190,6 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
                 String suggestion = ReviewJsonUtils.safeText(c, "suggestion");
                 if (path == null || line == null || line <= 0 || body == null || body.isEmpty()) {
                     continue;
-                }
-                // Validate and optionally fix head-side line using diff index
-                int effectiveLine = line;
-                if (diffIndex != null) {
-                    boolean valid = DiffLineMapper.isValidHeadLine(diffIndex, path, line);
-                    if (!valid) {
-                        int fixed = DiffLineMapper.fixHeadLineOrOriginal(diffIndex, path, line);
-                        if (fixed <= 0) {
-                            // skip comments that cannot be mapped to a valid head line
-                            logger.info("Skip comment due to invalid head line and no fix. path={}, requestedLine={}", path, line);
-                            continue;
-                        }
-                        effectiveLine = fixed;
-                    }
                 }
                 String fullBody = body;
                 if (severity != null && !severity.isEmpty()) {
@@ -225,10 +209,10 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
                     fullBody = "🔎 **Severity:** " + sevEmoji + " " + severity + "\n\n" + fullBody;
                 }
                 if (suggestion != null && !suggestion.isEmpty()) {
-                    fullBody = fullBody + "\n\n```suggestion\n" + suggestion + "\n```";
+                    fullBody = fullBody + "\n\n" + suggestion + "\n";
                 }
-                int rank = severityRank(severity);
-                rankedComments.add(new RankedReviewComment(new ReviewComment(path, "RIGHT", effectiveLine, fullBody), rank, seq++));
+                int rank = SeverityUtils.severityRank(severity);
+                rankedComments.add(new RankedReviewComment(new ReviewComment(path, "RIGHT", line, fullBody), rank, seq++));
             }
             if (!rankedComments.isEmpty()) {
                 rankedComments.sort((a, b) -> {
@@ -343,18 +327,6 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
         logger.info("PR review created successfully. code={}", code);
     }
 
-    private int severityRank(String severity) {
-        if (severity == null) {
-            return 2; // default around minor
-        }
-        String s = severity.toLowerCase();
-        if ("critical".equals(s)) return 0;
-        if ("major".equals(s)) return 1;
-        if ("minor".equals(s)) return 2;
-        if ("suggestion".equals(s)) return 3;
-        return 2;
-    }
-
     private static final class ReviewComment {
         final String path;
         final String side; // "RIGHT" or "LEFT"
@@ -367,6 +339,7 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
             this.body = body;
         }
     }
+
 
     private static final class RankedReviewComment {
         final ReviewComment comment;

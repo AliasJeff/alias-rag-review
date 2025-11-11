@@ -58,9 +58,32 @@ public final class ReviewPrompts {
             + "- 建议代码段必须是替换后的完整内容，不要只写片段符号。\n"
             + "- 如果无法确定行号或文件，跳过该条 comment。\n"
             + "- overall_score 为 0~100 整数，100 表示代码质量最佳，0 表示存在严重问题。\n"
+            + "- 字符串中的内部引号必须转义 \\\"，换行使用 \\n。\n"
             + "\n"
             + "输入为 Git diff 全文，请按上述 JSON 输出，不要额外文本：\n"
-            + "PR_DIFFS:\n<Git diff>";
+            + "PR_DIFFS:\n<Git diff>\n"
+            + "\n"
+            + "=== 输出示例 ===\n"
+            + "{\n"
+            + "  \"overall_score\": 88,\n"
+            + "  \"summary\": \"This PR refactors GitCommand utilities, centralizes prompt definitions, and improves logging and JSON handling. The changes enhance maintainability and modularization.\",\n"
+            + "  \"comments\": [\n"
+            + "    {\n"
+            + "      \"path\": \"openai-code-review/openai-code-review-sdk/src/main/java/com/alias/middleware/sdk/domain/service/impl/ReviewPullRequestService.java\",\n"
+            + "      \"line\": 120,\n"
+            + "      \"severity\": \"major\",\n"
+            + "      \"body\": \"Using string concatenation for prompts may reduce readability and performance. Consider using StringBuilder.\",\n"
+            + "      \"suggestion\": \"```suggestion\\n        StringBuilder mergedPrompt = new StringBuilder(ReviewPrompts.PR_REVIEW_PROMPT);\\n        mergedPrompt.append(diffCode == null ? \\\"\\\" : diffCode);\\n        add(new ChatCompletionRequestDTO.Prompt(\\\"user\\\", mergedPrompt.toString()));\\n```\"\n"
+            + "    },\n"
+            + "    {\n"
+            + "      \"path\": \"openai-code-review/openai-code-review-sdk/src/main/resources/logback-spring.xml\",\n"
+            + "      \"line\": 49,\n"
+            + "      \"severity\": \"critical\",\n"
+            + "      \"body\": \"Root logger set to DEBUG in production may leak sensitive info. Use INFO or higher in production.\",\n"
+            + "      \"suggestion\": \"```suggestion\\n    <root level=\\\"INFO\\\">\\n```\"\n"
+            + "    }\n"
+            + "  ]\n"
+            + "}";
 
     /**
      * Prompt for single-commit/last-diff review that returns a structured markdown

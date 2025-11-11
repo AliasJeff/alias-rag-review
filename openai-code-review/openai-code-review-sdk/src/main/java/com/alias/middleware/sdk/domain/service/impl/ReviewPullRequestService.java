@@ -13,11 +13,9 @@ import com.alias.middleware.sdk.config.AppConfig;
 import com.alias.middleware.sdk.domain.prompt.ReviewPrompts;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.alias.middleware.sdk.utils.DiffLineMapper;
 import com.alias.middleware.sdk.utils.ReviewJsonUtils;
 import com.alias.middleware.sdk.utils.ReviewCommentUtils;
 import com.alias.middleware.sdk.utils.IoUtils;
-import com.alias.middleware.sdk.utils.DiffChunkUtils;
 import com.alias.middleware.sdk.utils.SeverityUtils;
 
 import java.io.IOException;
@@ -136,85 +134,15 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
                     add(new ChatCompletionRequestDTO.Prompt("user", mergedPrompt));
                 }
             });
+            logger.info("Request: {}", chatCompletionRequest);
             ChatCompletionSyncResponseDTO completions = openAI.completions(chatCompletionRequest);
             ChatCompletionSyncResponseDTO.Message message = completions.getChoices().get(0).getMessage();
             logger.info("Received review response from LLM. contentSize={}", message != null && message.getContent() != null ? message.getContent().length() : 0);
-            logger.debug("Review response: {}", message.getContent());
+            logger.info("Review response: {}", message.getContent());
             return message.getContent();
         }
-        // 分片处理：按文件块切分 diff 并合并结果
-        logger.info("Prompt too large, performing chunked review.");
-        List<String> chunks = DiffChunkUtils.splitDiffByFileBlocks(safeDiff, MAX_PROMPT_CHARS - basePrompt.length() - 10_000);
-        List<JsonNode> partResults = new ArrayList<>();
-        ObjectMapper mapper = new ObjectMapper();
-        int idx = 0;
-        for (String part : chunks) {
-            idx++;
-            String partInstruction = "【分片 " + idx + "/" + chunks.size() + "】以下仅是本次 PR diff 的一部分。请严格按既定 JSON 输出格式返回，建议只输出本分片涉及到的 comments；overall_score 与 summary 可按分片视角给出。\n\n";
-            String partPrompt = partInstruction + basePrompt.replace("<Git diff>", part);
-            ChatCompletionRequestDTO chatCompletionRequest = new ChatCompletionRequestDTO();
-            chatCompletionRequest.setModel(this.model != null ? this.model : ModelEnum.GPT_4O.getCode());
-            chatCompletionRequest.setMessages(new ArrayList<ChatCompletionRequestDTO.Prompt>() {
-                private static final long serialVersionUID = -7988151926241837899L;
-                {
-                    add(new ChatCompletionRequestDTO.Prompt("user", partPrompt));
-                }
-            });
-            ChatCompletionSyncResponseDTO completions = openAI.completions(chatCompletionRequest);
-            ChatCompletionSyncResponseDTO.Message message = completions.getChoices().get(0).getMessage();
-            String content = message != null ? message.getContent() : null;
-            logger.info("Chunk {} response size={}", idx, content != null ? content.length() : 0);
-            String jsonPayload;
-            try {
-                mapper.readTree(content);
-                jsonPayload = content;
-            } catch (Exception e) {
-                jsonPayload = ReviewJsonUtils.extractJsonPayload(content != null ? content : "");
-            }
-            try {
-                partResults.add(mapper.readTree(jsonPayload));
-            } catch (Exception e) {
-                logger.warn("Skip invalid chunk {} JSON. err={}", idx, e.toString());
-            }
-        }
-        // 聚合：comments 合并，overall_score 取平均，summary 合并
-        int countScore = 0;
-        int sumScore = 0;
-        StringBuilder mergedSummary = new StringBuilder();
-        List<JsonNode> allComments = new ArrayList<>();
-        for (JsonNode pr : partResults) {
-            Integer s = ReviewJsonUtils.safeInt(pr, "overall_score");
-            if (s != null) {
-                sumScore += s;
-                countScore++;
-            }
-            String sm = ReviewJsonUtils.safeText(pr, "summary");
-            if (sm != null && !sm.isEmpty()) {
-                if (mergedSummary.length() > 0) mergedSummary.append("\n");
-                mergedSummary.append("• ").append(sm);
-            }
-            JsonNode cs = pr.get("comments");
-            if (cs != null && cs.isArray()) {
-                for (JsonNode c : cs) {
-                    allComments.add(c);
-                }
-            }
-        }
-        int finalScore = countScore > 0 ? Math.max(0, Math.min(100, Math.round((float) sumScore / countScore))) : 70;
-        String finalSummary = mergedSummary.length() > 0 ? mergedSummary.toString() : "分片审查汇总：未提供摘要。";
-        StringBuilder sb = new StringBuilder();
-        sb.append("{");
-        sb.append("\"overall_score\":").append(finalScore).append(",");
-        sb.append("\"summary\":").append(ReviewJsonUtils.toJsonString(finalSummary)).append(",");
-        sb.append("\"comments\":[");
-        for (int i = 0; i < allComments.size(); i++) {
-            if (i > 0) sb.append(",");
-            sb.append(allComments.get(i).toString());
-        }
-        sb.append("]}");
-        String aggregated = sb.toString();
-        logger.info("Aggregated chunked review. commentsCount={}, finalScore={}", allComments.size(), finalScore);
-        return aggregated;
+        logger.warn("Prompt too large for single request; chunked processing has been disabled.");
+        throw new RuntimeException("Prompt too large for single request; please reduce diff size.");
     }
 
     @Override
@@ -228,7 +156,9 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
             root = mapper.readTree(recommend);
         } catch (Exception parseErr) {
             logger.warn("LLM output is not pure JSON, attempting to extract JSON. err={}", parseErr.toString());
+            logger.info("recommend: {}", recommend);
             String cleaned = ReviewJsonUtils.extractJsonPayload(recommend);
+            logger.info("cleaned: {}", cleaned);
             root = mapper.readTree(cleaned);
         }
         Integer overallScore = ReviewJsonUtils.safeInt(root, "overall_score");
@@ -245,16 +175,6 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
         // Inline comments
         JsonNode comments = root.get("comments");
         if (comments != null && comments.isArray() && comments.size() > 0) {
-            // Build diff index for head-side line validation/fix
-            String unifiedDiff;
-            DiffLineMapper.Index diffIndex = null;
-            try {
-                unifiedDiff = getDiffCode();
-                diffIndex = DiffLineMapper.index(unifiedDiff != null ? unifiedDiff : "");
-                logger.info("Diff index built for head line validation. validPaths={}", diffIndex != null ? "yes" : "no");
-            } catch (Exception e) {
-                logger.warn("Failed to build diff index; will skip line auto-fix. err={}", e.toString());
-            }
             // Ensure refs are fetched and resolve commit sha of head
             gitCommand.fetchRemoteRef("origin", this.headRef);
             String commitSha = gitCommand.getRemoteRefCommitSha("origin", this.headRef);
@@ -270,20 +190,6 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
                 String suggestion = ReviewJsonUtils.safeText(c, "suggestion");
                 if (path == null || line == null || line <= 0 || body == null || body.isEmpty()) {
                     continue;
-                }
-                // Validate and optionally fix head-side line using diff index
-                int effectiveLine = line;
-                if (diffIndex != null) {
-                    boolean valid = DiffLineMapper.isValidHeadLine(diffIndex, path, line);
-                    if (!valid) {
-                        int fixed = DiffLineMapper.fixHeadLineOrOriginal(diffIndex, path, line);
-                        if (fixed <= 0) {
-                            // skip comments that cannot be mapped to a valid head line
-                            logger.info("Skip comment due to invalid head line and no fix. path={}, requestedLine={}", path, line);
-                            continue;
-                        }
-                        effectiveLine = fixed;
-                    }
                 }
                 String fullBody = body;
                 if (severity != null && !severity.isEmpty()) {
@@ -303,10 +209,10 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
                     fullBody = "🔎 **Severity:** " + sevEmoji + " " + severity + "\n\n" + fullBody;
                 }
                 if (suggestion != null && !suggestion.isEmpty()) {
-                    fullBody = fullBody + "\n\n```suggestion\n" + suggestion + "\n```";
+                    fullBody = fullBody + "\n\n" + suggestion + "\n";
                 }
                 int rank = SeverityUtils.severityRank(severity);
-                rankedComments.add(new RankedReviewComment(new ReviewComment(path, "RIGHT", effectiveLine, fullBody), rank, seq++));
+                rankedComments.add(new RankedReviewComment(new ReviewComment(path, "RIGHT", line, fullBody), rank, seq++));
             }
             if (!rankedComments.isEmpty()) {
                 rankedComments.sort((a, b) -> {

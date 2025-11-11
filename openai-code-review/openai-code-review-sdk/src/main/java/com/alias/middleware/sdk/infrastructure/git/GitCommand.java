@@ -4,7 +4,7 @@ import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import com.alias.middleware.sdk.types.utils.RandomStringUtils;
+import com.alias.middleware.sdk.utils.RandomStringUtils;
 
 import java.io.*;
 import java.text.SimpleDateFormat;

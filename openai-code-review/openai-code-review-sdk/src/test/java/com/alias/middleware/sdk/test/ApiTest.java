@@ -7,8 +7,8 @@ import com.alias.middleware.sdk.domain.model.ModelEnum;
 import com.alias.middleware.sdk.domain.service.impl.ReviewPullRequestService;
 import com.alias.middleware.sdk.infrastructure.openai.impl.OpenAI;
 import com.alias.middleware.sdk.infrastructure.git.GitCommand;
-import com.alias.middleware.sdk.types.utils.BearerTokenUtils;
-import com.alias.middleware.sdk.types.utils.GitHubPrUtils;
+import com.alias.middleware.sdk.utils.BearerTokenUtils;
+import com.alias.middleware.sdk.utils.GitHubPrUtils;
 import com.alias.middleware.sdk.config.AppConfig;
 
 
@@ -35,9 +35,9 @@ public class ApiTest {
         AppConfig cfg = AppConfig.getInstance();
         String baseRef = "main";
         // NOTE: 手动填写 headRef
-        String headRef = "20251110-review-pull-request";
+        String headRef = "20251111-review-pr-request-change";
         // NOTE: 手动填写 PR URL
-        String url = "https://github.com/AliasJeff/alias-rag-review/pull/1";
+        String url = "https://github.com/AliasJeff/alias-rag-review/pull/2";
 
         // 组装依赖
         // 即便 PR 评论不再写日志仓库，GitCommand 仍用于生成 diff

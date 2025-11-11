@@ -30,7 +30,7 @@ public class OpenAiCodeReviewService extends AbstractOpenAiCodeReviewService {
         chatCompletionRequest.setMessages(new ArrayList<ChatCompletionRequestDTO.Prompt>() {
             private static final long serialVersionUID = -7988151926241837899L;
             {
-                String mergedPrompt = ReviewPrompts.PR_REVIEW_COPILOT_STYLE_SCORE_100
+                String mergedPrompt = ReviewPrompts.PR_REVIEW_PROMPT
                         .replace("<Git diff>", diffCode == null ? "" : diffCode);
                 add(new ChatCompletionRequestDTO.Prompt("user", mergedPrompt));
             }

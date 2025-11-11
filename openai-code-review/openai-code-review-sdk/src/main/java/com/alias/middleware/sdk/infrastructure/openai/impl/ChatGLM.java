@@ -4,7 +4,7 @@ import com.alibaba.fastjson2.JSON;
 import com.alias.middleware.sdk.infrastructure.openai.IOpenAI;
 import com.alias.middleware.sdk.infrastructure.openai.dto.ChatCompletionRequestDTO;
 import com.alias.middleware.sdk.infrastructure.openai.dto.ChatCompletionSyncResponseDTO;
-import com.alias.middleware.sdk.types.utils.BearerTokenUtils;
+import com.alias.middleware.sdk.utils.BearerTokenUtils;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;

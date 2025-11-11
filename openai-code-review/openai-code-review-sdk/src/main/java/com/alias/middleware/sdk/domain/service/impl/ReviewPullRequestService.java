@@ -6,17 +6,19 @@ import com.alias.middleware.sdk.infrastructure.git.GitCommand;
 import com.alias.middleware.sdk.infrastructure.openai.IOpenAI;
 import com.alias.middleware.sdk.infrastructure.openai.dto.ChatCompletionRequestDTO;
 import com.alias.middleware.sdk.infrastructure.openai.dto.ChatCompletionSyncResponseDTO;
-import com.alias.middleware.sdk.types.utils.GitHubPrUtils;
+import com.alias.middleware.sdk.utils.GitHubPrUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import com.alias.middleware.sdk.config.AppConfig;
 import com.alias.middleware.sdk.domain.prompt.ReviewPrompts;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.alias.middleware.sdk.utils.DiffLineMapper;
+import com.alias.middleware.sdk.utils.ReviewJsonUtils;
+import com.alias.middleware.sdk.utils.ReviewCommentUtils;
+import com.alias.middleware.sdk.utils.IoUtils;
 
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -124,7 +126,7 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
         chatCompletionRequest.setMessages(new ArrayList<ChatCompletionRequestDTO.Prompt>() {
             private static final long serialVersionUID = -7988151926241837899L;
             {
-                String mergedPrompt = ReviewPrompts.PR_REVIEW_COPILOT_STYLE_SCORE_100
+                String mergedPrompt = ReviewPrompts.PR_REVIEW_PROMPT
                         .replace("<Git diff>", diffCode == null ? "" : diffCode);
                 add(new ChatCompletionRequestDTO.Prompt("user", mergedPrompt));
             }
@@ -148,57 +150,96 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
             root = mapper.readTree(recommend);
         } catch (Exception parseErr) {
             logger.warn("LLM output is not pure JSON, attempting to extract JSON. err={}", parseErr.toString());
-            String cleaned = extractJsonPayload(recommend);
+            String cleaned = ReviewJsonUtils.extractJsonPayload(recommend);
             root = mapper.readTree(cleaned);
         }
-        Integer overallScore = safeInt(root, "overall_score");
-        String summary = safeText(root, "summary");
-        String general = safeText(root, "general_review");
+        Integer overallScore = ReviewJsonUtils.safeInt(root, "overall_score");
+        String summary = ReviewJsonUtils.safeText(root, "summary");
+        String general = ReviewJsonUtils.safeText(root, "general_review");
         StringBuilder topBuilder = new StringBuilder();
         if (overallScore != null) {
             topBuilder.append("### 😀 整体评分\n").append("⭐️ ").append(overallScore).append("/100").append("\n\n");
         }
-        topBuilder.append(buildTopLevelComment(summary, general));
+        topBuilder.append(ReviewCommentUtils.buildTopLevelComment(summary, general));
         String combinedTop = topBuilder.toString();
         postCommentToGithubPr(combinedTop);
 
         // Inline comments
         JsonNode comments = root.get("comments");
         if (comments != null && comments.isArray() && comments.size() > 0) {
+            // Build diff index for head-side line validation/fix
+            String unifiedDiff;
+            DiffLineMapper.Index diffIndex = null;
+            try {
+                unifiedDiff = getDiffCode();
+                diffIndex = DiffLineMapper.index(unifiedDiff != null ? unifiedDiff : "");
+                logger.info("Diff index built for head line validation. validPaths={}", diffIndex != null ? "yes" : "no");
+            } catch (Exception e) {
+                logger.warn("Failed to build diff index; will skip line auto-fix. err={}", e.toString());
+            }
             // Ensure refs are fetched and resolve commit sha of head
             gitCommand.fetchRemoteRef("origin", this.headRef);
             String commitSha = gitCommand.getRemoteRefCommitSha("origin", this.headRef);
-            List<ReviewComment> reviewComments = new ArrayList<>();
+            List<RankedReviewComment> rankedComments = new ArrayList<>();
             Iterator<JsonNode> it = comments.elements();
+            int seq = 0;
             while (it.hasNext()) {
                 JsonNode c = it.next();
-                String path = safeText(c, "path");
-                Integer line = safeInt(c, "line");
-                String confidence = safeText(c, "confidence");
-                String body = safeText(c, "body");
-                String suggestion = safeText(c, "suggestion");
+                String path = ReviewJsonUtils.safeText(c, "path");
+                    Integer line = ReviewJsonUtils.safeInt(c, "line");
+                    String severity = ReviewJsonUtils.safeText(c, "severity");
+                String body = ReviewJsonUtils.safeText(c, "body");
+                String suggestion = ReviewJsonUtils.safeText(c, "suggestion");
                 if (path == null || line == null || line <= 0 || body == null || body.isEmpty()) {
                     continue;
                 }
-                String fullBody = body;
-                if (confidence != null && !confidence.isEmpty()) {
-                    String confEmoji;
-                    if ("high".equalsIgnoreCase(confidence) || "high confidence".equalsIgnoreCase(confidence)) {
-                        confEmoji = "🔥";
-                    } else if ("low".equalsIgnoreCase(confidence) || "low confidence".equalsIgnoreCase(confidence)) {
-                        confEmoji = "⚠️";
-                    } else {
-                        confEmoji = "💡";
+                // Validate and optionally fix head-side line using diff index
+                int effectiveLine = line;
+                if (diffIndex != null) {
+                    boolean valid = DiffLineMapper.isValidHeadLine(diffIndex, path, line);
+                    if (!valid) {
+                        int fixed = DiffLineMapper.fixHeadLineOrOriginal(diffIndex, path, line);
+                        if (fixed <= 0) {
+                            // skip comments that cannot be mapped to a valid head line
+                            logger.info("Skip comment due to invalid head line and no fix. path={}, requestedLine={}", path, line);
+                            continue;
+                        }
+                        effectiveLine = fixed;
                     }
-                    fullBody = "🔎 **Confidence:** " + confEmoji + " " + confidence + "\n\n" + fullBody;
+                }
+                String fullBody = body;
+                if (severity != null && !severity.isEmpty()) {
+                    String sevEmoji;
+                    String sevLower = severity.toLowerCase();
+                    if ("critical".equals(sevLower)) {
+                        sevEmoji = "🛑";
+                    } else if ("major".equals(sevLower)) {
+                        sevEmoji = "⚠️";
+                    } else if ("minor".equals(sevLower)) {
+                        sevEmoji = "ℹ️";
+                    } else if ("suggestion".equals(sevLower)) {
+                        sevEmoji = "💡";
+                    } else {
+                        sevEmoji = "🔎";
+                    }
+                    fullBody = "🔎 **Severity:** " + sevEmoji + " " + severity + "\n\n" + fullBody;
                 }
                 if (suggestion != null && !suggestion.isEmpty()) {
                     fullBody = fullBody + "\n\n```suggestion\n" + suggestion + "\n```";
                 }
-                reviewComments.add(new ReviewComment(path, "RIGHT", line, fullBody));
+                int rank = severityRank(severity);
+                rankedComments.add(new RankedReviewComment(new ReviewComment(path, "RIGHT", effectiveLine, fullBody), rank, seq++));
             }
-            if (!reviewComments.isEmpty()) {
-                createPullRequestReview(commitSha, "AI Code Review inline comments", reviewComments);
+            if (!rankedComments.isEmpty()) {
+                rankedComments.sort((a, b) -> {
+                    if (a.rank != b.rank) return Integer.compare(a.rank, b.rank);
+                    return Integer.compare(a.index, b.index);
+                });
+                List<ReviewComment> ordered = new ArrayList<>();
+                for (RankedReviewComment rc : rankedComments) {
+                    ordered.add(rc.comment);
+                }
+                createPullRequestReview(commitSha, "AI Code Review inline comments", ordered);
             }
         }
         return prUrl;
@@ -226,7 +267,7 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
         }
 
         String api = "https://api.github.com/repos/" + repo + "/issues/" + this.prNumber + "/comments";
-        String payload = "{\"body\":" + toJsonString(body) + "}";
+        String payload = "{\"body\":" + ReviewJsonUtils.toJsonString(body) + "}";
 
         logger.info("Posting comment to GitHub. api={}, repo={}, pr={}", api, repo, this.prNumber);
         URL url = new URL(api);
@@ -242,7 +283,7 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
         }
         int code = conn.getResponseCode();
         if (code / 100 != 2) {
-            String errMsg = readStreamSafely(conn.getErrorStream());
+            String errMsg = IoUtils.readStreamSafely(conn.getErrorStream());
             throw new RuntimeException("GitHub comment failed, code=" + code + ", err=" + errMsg);
         }
         // 返回 PR 链接，便于日志打印
@@ -265,17 +306,17 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
         String api = "https://api.github.com/repos/" + repo + "/pulls/" + this.prNumber + "/reviews";
         StringBuilder sb = new StringBuilder();
         sb.append("{");
-        sb.append("\"commit_id\":").append(toJsonString(commitSha)).append(",");
-        sb.append("\"body\":").append(toJsonString(body)).append(",");
+        sb.append("\"commit_id\":").append(ReviewJsonUtils.toJsonString(commitSha)).append(",");
+        sb.append("\"body\":").append(ReviewJsonUtils.toJsonString(body)).append(",");
         sb.append("\"event\":\"COMMENT\",");
         sb.append("\"comments\":[");
         for (int i = 0; i < comments.size(); i++) {
             ReviewComment c = comments.get(i);
             sb.append("{")
-                    .append("\"path\":").append(toJsonString(c.path)).append(",")
-                    .append("\"side\":").append(toJsonString(c.side)).append(",")
+                    .append("\"path\":").append(ReviewJsonUtils.toJsonString(c.path)).append(",")
+                    .append("\"side\":").append(ReviewJsonUtils.toJsonString(c.side)).append(",")
                     .append("\"line\":").append(c.line).append(",")
-                    .append("\"body\":").append(toJsonString(c.body))
+                    .append("\"body\":").append(ReviewJsonUtils.toJsonString(c.body))
                     .append("}");
             if (i < comments.size() - 1) sb.append(",");
         }
@@ -296,40 +337,22 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
         }
         int code = conn.getResponseCode();
         if (code / 100 != 2) {
-            String errMsg = readStreamSafely(conn.getErrorStream());
+            String errMsg = IoUtils.readStreamSafely(conn.getErrorStream());
             throw new RuntimeException("Create PR review failed, code=" + code + ", err=" + errMsg);
         }
         logger.info("PR review created successfully. code={}", code);
     }
 
-    private String buildTopLevelComment(String summary, String generalReview) {
-        StringBuilder sb = new StringBuilder();
-        if (summary != null && !summary.isEmpty()) {
-            sb.append("### PR 变更摘要\n").append(summary).append("\n\n");
+    private int severityRank(String severity) {
+        if (severity == null) {
+            return 2; // default around minor
         }
-        if (generalReview != null && !generalReview.isEmpty()) {
-            sb.append("### 综合审查\n").append(generalReview);
-        }
-        return sb.length() == 0 ? "AI 代码审查无可用摘要或综合意见。" : sb.toString();
-    }
-
-    private static String safeText(JsonNode node, String field) {
-        if (node == null) return null;
-        JsonNode n = node.get(field);
-        if (n == null || n.isNull()) return null;
-        String s = n.asText();
-        return (s != null && !s.trim().isEmpty()) ? s : null;
-    }
-
-    private static Integer safeInt(JsonNode node, String field) {
-        if (node == null) return null;
-        JsonNode n = node.get(field);
-        if (n == null || n.isNull()) return null;
-        try {
-            return n.asInt();
-        } catch (Exception e) {
-            return null;
-        }
+        String s = severity.toLowerCase();
+        if ("critical".equals(s)) return 0;
+        if ("major".equals(s)) return 1;
+        if ("minor".equals(s)) return 2;
+        if ("suggestion".equals(s)) return 3;
+        return 2;
     }
 
     private static final class ReviewComment {
@@ -345,77 +368,15 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
         }
     }
 
-    private String readStreamSafely(java.io.InputStream is) throws IOException {
-        if (is == null) return "";
-        try (BufferedReader br = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
-            StringBuilder sb = new StringBuilder();
-            String line;
-            while ((line = br.readLine()) != null) {
-                sb.append(line).append('\n');
-            }
-            return sb.toString();
+    private static final class RankedReviewComment {
+        final ReviewComment comment;
+        final int rank;
+        final int index;
+        RankedReviewComment(ReviewComment comment, int rank, int index) {
+            this.comment = comment;
+            this.rank = rank;
+            this.index = index;
         }
-    }
-
-    private String toJsonString(String s) {
-        if (s == null) return "null";
-        StringBuilder sb = new StringBuilder();
-        sb.append('"');
-        for (int i = 0; i < s.length(); i++) {
-            char c = s.charAt(i);
-            switch (c) {
-                case '"': sb.append("\\\""); break;
-                case '\\': sb.append("\\\\"); break;
-                case '\b': sb.append("\\b"); break;
-                case '\f': sb.append("\\f"); break;
-                case '\n': sb.append("\\n"); break;
-                case '\r': sb.append("\\r"); break;
-                case '\t': sb.append("\\t"); break;
-                default:
-                    if (c < 0x20) {
-                        sb.append(String.format("\\u%04x", (int) c));
-                    } else {
-                        sb.append(c);
-                    }
-            }
-        }
-        sb.append('"');
-        return sb.toString();
-    }
-    
-    /**
-     * Extract a JSON object string from a potentially markdown-formatted LLM output.
-     * Handles ```json ... ``` fences and leading/trailing prose. Falls back to first {...} slice.
-     */
-    private String extractJsonPayload(String text) {
-        if (text == null) return "";
-        String s = text.trim();
-        // Handle fenced code blocks ```json ... ```
-        int fenceStart = s.indexOf("```");
-        if (fenceStart >= 0) {
-            int fenceEnd = s.indexOf("```", fenceStart + 3);
-            if (fenceEnd > fenceStart) {
-                String fenced = s.substring(fenceStart + 3, fenceEnd);
-                // Remove optional language hint like "json" or "JSON"
-                String trimmed = fenced.trim();
-                if (trimmed.regionMatches(true, 0, "json", 0, Math.min(4, trimmed.length()))) {
-                    trimmed = trimmed.substring(Math.min(4, trimmed.length())).trim();
-                }
-                return sliceFirstJsonObject(trimmed);
-            }
-        }
-        // No fences; try to slice first JSON object
-        return sliceFirstJsonObject(s);
-    }
-    
-    private String sliceFirstJsonObject(String s) {
-        int start = s.indexOf('{');
-        int end = s.lastIndexOf('}');
-        if (start >= 0 && end >= start) {
-            return s.substring(start, end + 1).trim();
-        }
-        // As a last resort, return original trimmed string
-        return s.trim();
     }
 }
 

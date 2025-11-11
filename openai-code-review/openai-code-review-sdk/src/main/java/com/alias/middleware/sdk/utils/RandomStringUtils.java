@@ -1,4 +1,4 @@
-package com.alias.middleware.sdk.types.utils;
+package com.alias.middleware.sdk.utils;
 
 import java.util.Random;
 

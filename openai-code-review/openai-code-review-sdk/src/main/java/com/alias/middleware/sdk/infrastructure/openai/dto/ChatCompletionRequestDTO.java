@@ -37,6 +37,14 @@ public class ChatCompletionRequestDTO {
             this.content = content;
         }
 
+        @Override
+        public String toString() {
+            return "Prompt{" +
+                    "role='" + role + '\'' +
+                    ", content='" + content + '\'' +
+                    '}';
+        }
+
     }
 
     public String getModel() {
@@ -53,5 +61,13 @@ public class ChatCompletionRequestDTO {
 
     public void setMessages(List<Prompt> messages) {
         this.messages = messages;
+    }
+
+    @Override
+    public String toString() {
+        return "ChatCompletionRequestDTO{" +
+                "model='" + model + '\'' +
+                ", messages=" + messages +
+                '}';
     }
 }

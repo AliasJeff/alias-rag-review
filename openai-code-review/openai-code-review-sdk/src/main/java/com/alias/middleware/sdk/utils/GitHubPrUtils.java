@@ -1,4 +1,4 @@
-package com.alias.middleware.sdk.types.utils;
+package com.alias.middleware.sdk.utils;
 
 import java.net.MalformedURLException;
 import java.net.URL;

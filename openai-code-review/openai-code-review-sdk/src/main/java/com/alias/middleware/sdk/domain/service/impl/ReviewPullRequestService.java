@@ -17,6 +17,8 @@ import com.alias.middleware.sdk.utils.DiffLineMapper;
 import com.alias.middleware.sdk.utils.ReviewJsonUtils;
 import com.alias.middleware.sdk.utils.ReviewCommentUtils;
 import com.alias.middleware.sdk.utils.IoUtils;
+import com.alias.middleware.sdk.utils.DiffChunkUtils;
+import com.alias.middleware.sdk.utils.SeverityUtils;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -121,22 +123,98 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
     @Override
     protected String codeReview(String diffCode) throws Exception {
         logger.info("Submitting diff to LLM for review. model={}, diffSize={}", this.model != null ? this.model : ModelEnum.GPT_4O.getCode(), diffCode != null ? diffCode.length() : 0);
-        ChatCompletionRequestDTO chatCompletionRequest = new ChatCompletionRequestDTO();
-        chatCompletionRequest.setModel(this.model != null ? this.model : ModelEnum.GPT_4O.getCode());
-        chatCompletionRequest.setMessages(new ArrayList<ChatCompletionRequestDTO.Prompt>() {
-            private static final long serialVersionUID = -7988151926241837899L;
-            {
-                String mergedPrompt = ReviewPrompts.PR_REVIEW_PROMPT
-                        .replace("<Git diff>", diffCode == null ? "" : diffCode);
-                add(new ChatCompletionRequestDTO.Prompt("user", mergedPrompt));
+        final int MAX_PROMPT_CHARS = 180_000; // 粗略上限，避免超出供应商限制
+        String safeDiff = diffCode == null ? "" : diffCode;
+        String basePrompt = ReviewPrompts.PR_REVIEW_PROMPT;
+        String mergedPrompt = basePrompt.replace("<Git diff>", safeDiff);
+        if (mergedPrompt.length() <= MAX_PROMPT_CHARS) {
+            ChatCompletionRequestDTO chatCompletionRequest = new ChatCompletionRequestDTO();
+            chatCompletionRequest.setModel(this.model != null ? this.model : ModelEnum.GPT_4O.getCode());
+            chatCompletionRequest.setMessages(new ArrayList<ChatCompletionRequestDTO.Prompt>() {
+                private static final long serialVersionUID = -7988151926241837899L;
+                {
+                    add(new ChatCompletionRequestDTO.Prompt("user", mergedPrompt));
+                }
+            });
+            ChatCompletionSyncResponseDTO completions = openAI.completions(chatCompletionRequest);
+            ChatCompletionSyncResponseDTO.Message message = completions.getChoices().get(0).getMessage();
+            logger.info("Received review response from LLM. contentSize={}", message != null && message.getContent() != null ? message.getContent().length() : 0);
+            logger.debug("Review response: {}", message.getContent());
+            return message.getContent();
+        }
+        // 分片处理：按文件块切分 diff 并合并结果
+        logger.info("Prompt too large, performing chunked review.");
+        List<String> chunks = DiffChunkUtils.splitDiffByFileBlocks(safeDiff, MAX_PROMPT_CHARS - basePrompt.length() - 10_000);
+        List<JsonNode> partResults = new ArrayList<>();
+        ObjectMapper mapper = new ObjectMapper();
+        int idx = 0;
+        for (String part : chunks) {
+            idx++;
+            String partInstruction = "【分片 " + idx + "/" + chunks.size() + "】以下仅是本次 PR diff 的一部分。请严格按既定 JSON 输出格式返回，建议只输出本分片涉及到的 comments；overall_score 与 summary 可按分片视角给出。\n\n";
+            String partPrompt = partInstruction + basePrompt.replace("<Git diff>", part);
+            ChatCompletionRequestDTO chatCompletionRequest = new ChatCompletionRequestDTO();
+            chatCompletionRequest.setModel(this.model != null ? this.model : ModelEnum.GPT_4O.getCode());
+            chatCompletionRequest.setMessages(new ArrayList<ChatCompletionRequestDTO.Prompt>() {
+                private static final long serialVersionUID = -7988151926241837899L;
+                {
+                    add(new ChatCompletionRequestDTO.Prompt("user", partPrompt));
+                }
+            });
+            ChatCompletionSyncResponseDTO completions = openAI.completions(chatCompletionRequest);
+            ChatCompletionSyncResponseDTO.Message message = completions.getChoices().get(0).getMessage();
+            String content = message != null ? message.getContent() : null;
+            logger.info("Chunk {} response size={}", idx, content != null ? content.length() : 0);
+            String jsonPayload;
+            try {
+                mapper.readTree(content);
+                jsonPayload = content;
+            } catch (Exception e) {
+                jsonPayload = ReviewJsonUtils.extractJsonPayload(content != null ? content : "");
             }
-        });
-
-        ChatCompletionSyncResponseDTO completions = openAI.completions(chatCompletionRequest);
-        ChatCompletionSyncResponseDTO.Message message = completions.getChoices().get(0).getMessage();
-        logger.info("Received review response from LLM. contentSize={}", message != null && message.getContent() != null ? message.getContent().length() : 0);
-        logger.debug("Review response: {}", message.getContent());
-        return message.getContent();
+            try {
+                partResults.add(mapper.readTree(jsonPayload));
+            } catch (Exception e) {
+                logger.warn("Skip invalid chunk {} JSON. err={}", idx, e.toString());
+            }
+        }
+        // 聚合：comments 合并，overall_score 取平均，summary 合并
+        int countScore = 0;
+        int sumScore = 0;
+        StringBuilder mergedSummary = new StringBuilder();
+        List<JsonNode> allComments = new ArrayList<>();
+        for (JsonNode pr : partResults) {
+            Integer s = ReviewJsonUtils.safeInt(pr, "overall_score");
+            if (s != null) {
+                sumScore += s;
+                countScore++;
+            }
+            String sm = ReviewJsonUtils.safeText(pr, "summary");
+            if (sm != null && !sm.isEmpty()) {
+                if (mergedSummary.length() > 0) mergedSummary.append("\n");
+                mergedSummary.append("• ").append(sm);
+            }
+            JsonNode cs = pr.get("comments");
+            if (cs != null && cs.isArray()) {
+                for (JsonNode c : cs) {
+                    allComments.add(c);
+                }
+            }
+        }
+        int finalScore = countScore > 0 ? Math.max(0, Math.min(100, Math.round((float) sumScore / countScore))) : 70;
+        String finalSummary = mergedSummary.length() > 0 ? mergedSummary.toString() : "分片审查汇总：未提供摘要。";
+        StringBuilder sb = new StringBuilder();
+        sb.append("{");
+        sb.append("\"overall_score\":").append(finalScore).append(",");
+        sb.append("\"summary\":").append(ReviewJsonUtils.toJsonString(finalSummary)).append(",");
+        sb.append("\"comments\":[");
+        for (int i = 0; i < allComments.size(); i++) {
+            if (i > 0) sb.append(",");
+            sb.append(allComments.get(i).toString());
+        }
+        sb.append("]}");
+        String aggregated = sb.toString();
+        logger.info("Aggregated chunked review. commentsCount={}, finalScore={}", allComments.size(), finalScore);
+        return aggregated;
     }
 
     @Override
@@ -227,7 +305,7 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
                 if (suggestion != null && !suggestion.isEmpty()) {
                     fullBody = fullBody + "\n\n```suggestion\n" + suggestion + "\n```";
                 }
-                int rank = severityRank(severity);
+                int rank = SeverityUtils.severityRank(severity);
                 rankedComments.add(new RankedReviewComment(new ReviewComment(path, "RIGHT", effectiveLine, fullBody), rank, seq++));
             }
             if (!rankedComments.isEmpty()) {
@@ -343,18 +421,6 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
         logger.info("PR review created successfully. code={}", code);
     }
 
-    private int severityRank(String severity) {
-        if (severity == null) {
-            return 2; // default around minor
-        }
-        String s = severity.toLowerCase();
-        if ("critical".equals(s)) return 0;
-        if ("major".equals(s)) return 1;
-        if ("minor".equals(s)) return 2;
-        if ("suggestion".equals(s)) return 3;
-        return 2;
-    }
-
     private static final class ReviewComment {
         final String path;
         final String side; // "RIGHT" or "LEFT"
@@ -367,6 +433,7 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
             this.body = body;
         }
     }
+
 
     private static final class RankedReviewComment {
         final ReviewComment comment;

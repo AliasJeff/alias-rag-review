@@ -1,60 +1,39 @@
 package com.alias.middleware.sdk;
 
+import com.alias.middleware.sdk.domain.model.ModelEnum;
+import com.alias.middleware.sdk.domain.service.impl.ReviewPullRequestService;
+import com.alias.middleware.sdk.infrastructure.openai.impl.OpenAI;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import com.alias.middleware.sdk.domain.service.impl.OpenAiCodeReviewService;
 import com.alias.middleware.sdk.config.AppConfig;
 import com.alias.middleware.sdk.infrastructure.git.GitCommand;
 import com.alias.middleware.sdk.infrastructure.openai.IOpenAI;
-import com.alias.middleware.sdk.infrastructure.openai.impl.ChatGLM;
 
 public class OpenAiCodeReview {
 
     private static final Logger logger = LoggerFactory.getLogger(OpenAiCodeReview.class);
 
-    // ChatGLM 配置
-    private String chatglm_apiHost = "https://open.bigmodel.cn/api/paas/v4/chat/completions";
-    private String chatglm_apiKeySecret = "";
-
-    // Github 配置
-    private String github_review_log_uri;
-    private String github_token;
-
-    // 工程配置 - 自动获取
-    private String github_project;
-    private String github_branch;
-    private String github_author;
-
     public static void main(String[] args) throws Exception {
         AppConfig cfg = AppConfig.getInstance();
 
-        // Prefer ChatGLM defaults unless overridden
-        String chatglmHost = cfg.getString("chatglm", "apiHost");
-        String chatglmKey = cfg.getString("chatglm", "apiKeySecret");
+        // NOTE: 手动填写 PR URL
+        String url = "https://github.com/AliasJeff/alias-rag-review/pull/3";
 
-        String reviewLogUri = cfg.getString("github", "reviewLogUri");
-        String githubToken = cfg.getString("github", "token");
-        String project = cfg.getString("commit", "project");
-        String branch = cfg.getString("commit", "branch");
-        String author = cfg.getString("commit", "author");
-        String message = cfg.getString("commit", "message");
-
+        // 组装依赖
+        // GitCommand 用于通过 GitHub API 获取 PR diff 和 commit SHA
         GitCommand gitCommand = new GitCommand(
-                reviewLogUri,
-                githubToken,
-                project,
-                branch,
-                author,
-                message
+                cfg.getString("github", "token")
         );
 
-        IOpenAI openAI = new ChatGLM(
-                chatglmHost != null && !chatglmHost.isEmpty() ? chatglmHost : "https://open.bigmodel.cn/api/paas/v4/chat/completions",
-                cfg.requireString("chatglm", "apiKeySecret")
-        );
+        // 使用 OpenAI GPT-4o
+        IOpenAI openAI = new OpenAI(
+                cfg.getString("openai", "apiHost"),
+                cfg.getString("openai", "apiKey"));
 
-        OpenAiCodeReviewService openAiCodeReviewService = new OpenAiCodeReviewService(gitCommand, openAI);
-        openAiCodeReviewService.exec();
+        // 执行 PR 代码审查
+        ReviewPullRequestService reviewPullRequestService = new ReviewPullRequestService(gitCommand, openAI);
+        reviewPullRequestService.setModel(ModelEnum.GPT_4O);
+        reviewPullRequestService.exec(url);
 
         logger.info("openai-code-review done!");
     }

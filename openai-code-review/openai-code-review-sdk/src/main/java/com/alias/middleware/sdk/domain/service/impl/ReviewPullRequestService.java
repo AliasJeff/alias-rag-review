@@ -35,8 +35,7 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
     // PR 相关配置由调用方设置，不从环境变量读取
     private String repository; // owner/repo
     private String prNumber;   // 数字字符串
-    private String baseRef;    // base 分支引用
-    private String headRef;    // head 分支引用
+    private String prUrl;      // PR URL
     private String model;      // 模型名称，默认使用 GPT-4o
 
     public ReviewPullRequestService(GitCommand gitCommand, IOpenAI openAI) {
@@ -52,12 +51,8 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
         this.prNumber = prNumber;
     }
 
-    public void setBaseRef(String baseRef) {
-        this.baseRef = baseRef;
-    }
-
-    public void setHeadRef(String headRef) {
-        this.headRef = headRef;
+    public void setPrUrl(String prUrl) {
+        this.prUrl = prUrl;
     }
 
     /**
@@ -79,43 +74,33 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
     }
 
     /**
-     * 重载的 exec 方法，接收 PR URL、baseRef 和 headRef 作为参数
+     * 重载的 exec 方法，接收 PR URL 作为参数
      * 自动解析 URL 并设置相关参数，然后执行代码审查
      *
      * @param prUrl GitHub PR URL，格式：https://github.com/{owner}/{repo}/pull/{number}
-     * @param baseRef base 分支引用
-     * @param headRef head 分支引用
      */
-    public void exec(String prUrl, String baseRef, String headRef) {
-        logger.info("Starting PR review. prUrl={}, baseRef={}, headRef={}", prUrl, baseRef, headRef);
+    public void exec(String prUrl) {
+        logger.info("Starting PR review. prUrl={}", prUrl);
         GitHubPrUtils.PrInfo info = GitHubPrUtils.parsePrUrl(prUrl);
         logger.info("Parsed PR URL. repository={}, prNumber={}", info.repository, info.prNumber);
         this.setRepository(info.repository);
         this.setPrNumber(info.prNumber);
-        this.setBaseRef(baseRef);
-        this.setHeadRef(headRef);
-        logger.info("Executing review for {}/pull/{} with base={} head={}", info.repository, info.prNumber, baseRef, headRef);
+        this.setPrUrl(prUrl);
+        logger.info("Executing review for {}/pull/{}", info.repository, info.prNumber);
         this.exec();
     }
 
     @Override
     protected String getDiffCode() throws IOException, InterruptedException {
-        String base = this.baseRef;
-        String head = this.headRef;
-
-        if (base == null || base.isEmpty() || head == null || head.isEmpty()) {
-            logger.error("Base or head ref is empty. base='{}', head='{}'", base, head);
-            throw new RuntimeException("baseRef or headRef is empty; please set via exec(url, baseRef, headRef)");
+        if (this.prUrl == null || this.prUrl.isEmpty()) {
+            logger.error("PR URL is empty");
+            throw new RuntimeException("PR URL is empty; please set via exec(prUrl)");
         }
 
-        // 确保本地有最新远端引用
-        logger.info("Fetching refs from origin. base={}, head={}", base, head);
-        gitCommand.fetchRemoteRef("origin", base);
-        gitCommand.fetchRemoteRef("origin", head);
-
-        // 使用三点语法获取 merge-base 到 head 的变更
-        String diff = gitCommand.diffRemoteRefsThreeDot("origin", base, head);
-        logger.info("Generated git diff between origin/{}...origin/{}. size={} bytes", base, head, diff != null ? diff.length() : 0);
+        // 直接使用 GitHub API 获取 PR diff
+        logger.info("Fetching PR diff from GitHub API. prUrl={}", this.prUrl);
+        String diff = gitCommand.getPrDiff(this.prUrl);
+        logger.info("Generated PR diff. size={} bytes", diff != null ? diff.length() : 0);
         return diff;
     }
 
@@ -186,9 +171,8 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
         // Inline comments
         JsonNode comments = root.get("comments");
         if (comments != null && comments.isArray() && comments.size() > 0) {
-            // Ensure refs are fetched and resolve commit sha of head
-            gitCommand.fetchRemoteRef("origin", this.headRef);
-            String commitSha = gitCommand.getRemoteRefCommitSha("origin", this.headRef);
+            // 通过 GitHub API 获取 PR head commit SHA
+            String commitSha = gitCommand.getPrHeadCommitSha(this.repository, this.prNumber);
             List<RankedReviewComment> rankedComments = new ArrayList<>();
             Iterator<JsonNode> it = comments.elements();
             int seq = 0;

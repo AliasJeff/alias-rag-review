@@ -162,7 +162,7 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
         String general = ReviewJsonUtils.safeText(root, "general_review");
         StringBuilder topBuilder = new StringBuilder();
         if (overallScore != null) {
-            topBuilder.append("### 😀 整体评分\n").append("⭐️ ").append(overallScore).append("/100").append("\n\n");
+            topBuilder.append("### 😀 Overall Score\n").append("⭐️ ").append(overallScore).append("/100").append("\n\n");
         }
         topBuilder.append(ReviewCommentUtils.buildTopLevelComment(summary, general));
         String combinedTop = topBuilder.toString();

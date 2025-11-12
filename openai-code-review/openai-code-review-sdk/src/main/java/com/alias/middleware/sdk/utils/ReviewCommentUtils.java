@@ -10,12 +10,12 @@ public final class ReviewCommentUtils {
     public static String buildTopLevelComment(String summary, String generalReview) {
         StringBuilder sb = new StringBuilder();
         if (summary != null && !summary.isEmpty()) {
-            sb.append("### PR 变更摘要\n").append(summary).append("\n\n");
+            sb.append("### PR Change Summary\n").append(summary).append("\n\n");
         }
         if (generalReview != null && !generalReview.isEmpty()) {
-            sb.append("### 综合审查\n").append(generalReview);
+            sb.append("### General Review\n").append(generalReview);
         }
-        return sb.length() == 0 ? "AI 代码审查无可用摘要或综合意见。" : sb.toString();
+        return sb.length() == 0 ? "AI code review has no available summary or general review." : sb.toString();
     }
 
     public static int confidenceRank(String confidence) {

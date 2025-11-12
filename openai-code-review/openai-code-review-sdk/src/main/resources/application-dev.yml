@@ -14,7 +14,6 @@ openai:
   apiHost: https://api.openai.com/v1/chat/completions
   apiKey: ""
 github:
-  reviewLogUri: ""
   token: ""
 commit:
   project: "repo"

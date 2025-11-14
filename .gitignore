@@ -18,7 +18,6 @@ target/
 .classpath
 .project
 .settings/
-.vscode/
 
 # OS
 .DS_Store
@@ -31,7 +30,10 @@ dist/
 # Env
 .env
 
+# Allow .vscode config in openai-frontend for team consistency
+!openai-frontend/.vscode/
+!openai-frontend/.vscode/settings.json
+!openai-frontend/.vscode/extensions.json
+
 # Local application profile (contains secrets)
 openai-code-review/openai-code-review-sdk/src/main/resources/application-local.yml
-
-

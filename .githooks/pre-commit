@@ -1,24 +1,45 @@
 #!/bin/bash
 
-# Pre-commit hook for automatic code formatting with spotless
-# This script runs spotless:apply before allowing a commit
+# Pre-commit hook for automatic code formatting
+# This script runs:
+# 1. spotless:apply for Java projects (ai-rag-knowledge, openai-code-review)
+# 2. eslint --fix for the openai-frontend project
 
 set -e
 
-echo "Running spotless formatting check..."
-
-# Get the project root directory
 PROJECT_ROOT="$(git rev-parse --show-toplevel)"
 cd "$PROJECT_ROOT"
 
-# Run spotless on all modules
+echo "🔍 Running pre-commit linting and formatting..."
+
+# 1. Run spotless on Java projects
+echo "📦 Running spotless formatting for Java projects..."
 if ! mvn spotless:apply -q; then
     echo "❌ Spotless formatting failed"
     exit 1
 fi
+echo "✅ Java formatting completed"
 
-# Stage the formatted files
+# 2. Run ESLint on openai-frontend
+if [ -d "openai-frontend" ]; then
+    echo "🎨 Running ESLint for openai-frontend..."
+    cd openai-frontend
+    
+    # Check if node_modules exists, if not skip linting
+    if [ -d "node_modules" ]; then
+        if ! npx eslint --fix . 2>/dev/null; then
+            echo "⚠️  ESLint found issues (some may be auto-fixed)"
+        fi
+        echo "✅ Frontend linting completed"
+    else
+        echo "⚠️  node_modules not found in openai-frontend, skipping ESLint"
+    fi
+    
+    cd "$PROJECT_ROOT"
+fi
+
+# Stage all formatted files
 git add -A
 
-echo "✅ Code formatting completed successfully"
+echo "✅ All code formatting completed successfully"
 exit 0

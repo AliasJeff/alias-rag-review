@@ -105,6 +105,7 @@ public class RAGTest {
         List<Document> documents = pgVectorStore.similaritySearch(request);
         System.out.println("Found documents: " + documents.size());
         for (Document doc : documents) {
+            System.out.println("----------------------");
             System.out.println("Doc id: " + doc.getMetadata().get("id"));
             System.out.println("Content: " + doc.getFormattedContent());
         }
@@ -112,19 +113,31 @@ public class RAGTest {
 
     @Test
     public void test_testDeleteDocuments() {
+        // FIXME: 批量删除不起作用
         // 模拟需要删除的 docId
-        List<String> idsToDelete = List.of("test-doc-1", "test-doc-2");
+        List<String> idsToDelete = List.of("test-doc-1", "test-doc-2", "test-doc-3");
 
-        // 构建 filter
-        FilterExpressionBuilder builder = new FilterExpressionBuilder();
-        Filter.Expression filter = builder.or(
-                builder.eq("id", idsToDelete.get(0)),
-                builder.eq("id", idsToDelete.get(1))
-        ).build();
+        for (String id : idsToDelete) {
+            SearchRequest request = SearchRequest.builder()
+                    .query("search all")
+                    .topK(1)
+                    .filterExpression(new FilterExpressionBuilder().eq("id", id).build())
+                    .build();
+            List<Document> documents = pgVectorStore.similaritySearch(request);
 
-        pgVectorStore.delete(filter);
+            List<String> docIds = documents.stream().map(Document::getId).collect(Collectors.toList());
+            log.info("docIds: {}", docIds);
 
-        System.out.println("Deleted documents with filter: " + filter);
+            pgVectorStore.delete(docIds);
+        }
+
+//        // 构建 filter
+//        FilterExpressionBuilder builder = new FilterExpressionBuilder();
+//        Filter.Expression filter = builder.in("id", String.join(",", idsToDelete)).build();
+//
+//        pgVectorStore.delete(filter);
+//
+//        System.out.println("Deleted documents with filter: " + filter);
     }
 
 }

@@ -1,0 +1,24 @@
+#!/bin/bash
+
+# Pre-commit hook for automatic code formatting with spotless
+# This script runs spotless:apply before allowing a commit
+
+set -e
+
+echo "Running spotless formatting check..."
+
+# Get the project root directory
+PROJECT_ROOT="$(git rev-parse --show-toplevel)"
+cd "$PROJECT_ROOT"
+
+# Run spotless on all modules
+if ! mvn spotless:apply -q; then
+    echo "❌ Spotless formatting failed"
+    exit 1
+fi
+
+# Stage the formatted files
+git add -A
+
+echo "✅ Code formatting completed successfully"
+exit 0

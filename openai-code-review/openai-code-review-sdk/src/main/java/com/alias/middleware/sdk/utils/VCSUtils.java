@@ -224,6 +224,16 @@ public class VCSUtils {
 		public static Change delete(Integer oldLine, String content) {
 		 return new Change(ChangeType.DELETE, oldLine, null, content);
 		}
+
+		@Override
+		public String toString() {
+			return "Change{" +
+					"type='" + type + '\'' +
+					", oldLine='" + oldLine + '\'' +
+					", newLine='" + newLine + '\'' +
+					", content='" + content + '\'' +
+					'}';
+		}
 	}
 
 	public static final class Context {
@@ -231,6 +241,16 @@ public class VCSUtils {
 		private final List<String> newTextLines = new ArrayList<>();
 		public String oldText = "";
 		public String newText = "";
+
+		@Override
+		public String toString() {
+			return "Context{" +
+					"oldTextLines='" + oldTextLines + '\'' +
+					", newTextLines='" + newTextLines + '\'' +
+					", oldText='" + oldText + '\'' +
+					", newText='" + newText + '\'' +
+					'}';
+		}
 	}
 
 	public static final class FileChanges {
@@ -243,6 +263,18 @@ public class VCSUtils {
 		public FileChanges(String path, String oldPath) {
 			this.path = path;
 			this.oldPath = oldPath;
+		}
+
+
+		@Override
+		public String toString() {
+			return "FileChanges{" +
+					"path='" + path + '\'' +
+					", oldPath='" + oldPath + '\'' +
+					", changes='" + changes.toString() + '\'' +
+					", context='" + context + '\'' +
+					", linesChanged'" + linesChanged + '\'' +
+					'}';
 		}
 	}
 }

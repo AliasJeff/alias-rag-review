@@ -17,7 +17,7 @@ public class OpenAiCodeReview {
         AppConfig cfg = AppConfig.getInstance();
 
         // NOTE: 手动填写 PR URL
-        String url = "https://github.com/AliasJeff/alias-rag-review/pull/5";
+        String url = "https://github.com/AliasJeff/alias-rag-review/pull/8";
 
         // 组装依赖
         // GitCommand 用于通过 GitHub API 获取 PR diff 和 commit SHA

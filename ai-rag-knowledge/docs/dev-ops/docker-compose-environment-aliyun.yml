@@ -1,24 +1,22 @@
 # docker-compose -f docker-compose-environment-aliyun.yml up -d
-version: '3'
+name: ai-rag-knowledge
 services:
   # 对话模型
   # ollama pull deepseek-r1:1.5b
   # 运行模型
   # ollama run deepseek-r1:1.5b
   # 联网模型
-  # ollama pull nomic-embed-text
+  # ollama pull qwen3-embedding:0.6b
   ollama:
     image: registry.cn-hangzhou.aliyuncs.com/xfg-studio/ollama:0.5.10
-    container_name: ollama
     restart: unless-stopped
     ports:
       - "11434:11434"
     networks:
-      - my-network
+      - alias-rag-review
 
   redis:
     image: registry.cn-hangzhou.aliyuncs.com/xfg-studio/redis:6.2
-    container_name: redis
     restart: always
     hostname: redis
     privileged: true
@@ -28,7 +26,7 @@ services:
       - ./redis/redis.conf:/usr/local/etc/redis/redis.conf
     command: redis-server /usr/local/etc/redis/redis.conf
     networks:
-      - my-network
+      - alias-rag-review
     healthcheck:
       test: [ "CMD", "redis-cli", "ping" ]
       interval: 10s
@@ -38,7 +36,6 @@ services:
   # 账密 admin/admin
   redis-admin:
     image: registry.cn-hangzhou.aliyuncs.com/xfg-studio/redis-commander:0.8.0
-    container_name: redis-admin
     hostname: redis-commander
     restart: always
     ports:
@@ -51,14 +48,13 @@ services:
       - LANGUAGE=C.UTF-8
       - LC_ALL=C.UTF-8
     networks:
-      - my-network
+      - alias-rag-review
     depends_on:
       redis:
         condition: service_healthy
 
   vector_db:
     image: registry.cn-hangzhou.aliyuncs.com/xfg-studio/pgvector:v0.5.0
-    container_name: vector_db
     restart: always
     environment:
       - POSTGRES_USER=postgres
@@ -79,12 +75,11 @@ services:
       timeout: 20s
       retries: 10
     networks:
-      - my-network
+      - alias-rag-review
       
   # pg 管理工具
   pgadmin:
     image: registry.cn-hangzhou.aliyuncs.com/xfg-studio/pgadmin4:9.1.0
-    container_name: vector_db_admin
     restart: always
     ports:
       - "5050:80"
@@ -94,8 +89,8 @@ services:
     depends_on:
       - vector_db
     networks:
-      - my-network
+      - alias-rag-review
 
 networks:
-  my-network:
+  alias-rag-review:
     driver: bridge

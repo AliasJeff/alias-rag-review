@@ -32,11 +32,7 @@ import java.util.stream.Collectors;
 public class RAGTest {
 
     @Resource
-    private OllamaChatClient ollamaChatClient;
-    @Resource
     private TokenTextSplitter tokenTextSplitter;
-    @Resource
-    private SimpleVectorStore simpleVectorStore;
     @Resource
     private PgVectorStore pgVectorStore;
 
@@ -47,8 +43,8 @@ public class RAGTest {
         List<Document> documents = reader.get();
         List<Document> documentSplitterList = tokenTextSplitter.apply(documents);
 
-        documents.forEach(doc -> doc.getMetadata().put("knowledge", "知识库名称"));
-        documentSplitterList.forEach(doc -> doc.getMetadata().put("knowledge", "知识库名称"));
+        documents.forEach(doc -> doc.getMetadata().put("knowledge", "ai-rag-knowledge"));
+        documentSplitterList.forEach(doc -> doc.getMetadata().put("knowledge", "ai-rag-knowledge"));
 
         pgVectorStore.accept(documentSplitterList);
 
@@ -67,7 +63,7 @@ public class RAGTest {
                     {documents}
                 """;
 
-        SearchRequest request = SearchRequest.query(message).withTopK(5).withFilterExpression("knowledge == '知识库名称'");
+        SearchRequest request = SearchRequest.query(message).withTopK(5).withFilterExpression("knowledge == 'ai-rag-knowledge'");
 
         List<Document> documents = pgVectorStore.similaritySearch(request);
         String documentsCollectors = documents.stream().map(Document::getContent).collect(Collectors.joining());
@@ -78,9 +74,7 @@ public class RAGTest {
         messages.add(new UserMessage(message));
         messages.add(ragMessage);
 
-        ChatResponse chatResponse = ollamaChatClient.call(new Prompt(messages, OllamaOptions.create().withModel("deepseek-r1:1.5b")));
-
-        log.info("测试结果:{}", JSON.toJSONString(chatResponse));
+        log.info("message: {}", messages);
 
     }
 

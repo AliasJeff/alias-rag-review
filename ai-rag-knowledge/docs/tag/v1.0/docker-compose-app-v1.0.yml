@@ -29,11 +29,11 @@ services:
       - SPRING_DATASOURCE_DRIVER_CLASS_NAME=org.postgresql.Driver
       - SPRING_AI_OLLAMA_BASE_URL=http://117.72.115.188:11434
       - SPRING_AI_OLLAMA_EMBEDDING_OPTIONS_NUM_BATCH=512
-      - SPRING_AI_OLLAMA_MODEL=nomic-embed-text
+      - SPRING_AI_OLLAMA_MODEL=qwen3-embedding
       - SPRING_AI_OPENAI_BASE_URL=https://pro-share-aws-api.zcyai.com/
       - SPRING_AI_OPENAI_API_KEY=sk-eEyfxptPgbfXd3Z164260740E0494161Bd8957E918Ed7c4d
       - SPRING_AI_OPENAI_EMBEDDING_MODEL=text-embedding-ada-002
-      - SPRING_AI_RAG_EMBED=nomic-embed-text
+      - SPRING_AI_RAG_EMBED=qwen3-embedding
       - REDIS_SDK_CONFIG_HOST=redis
       - REDIS_SDK_CONFIG_PORT=6379
     volumes:

@@ -29,11 +29,7 @@ import java.util.List;
 public class JGitTest {
 
     @Resource
-    private OllamaChatClient ollamaChatClient;
-    @Resource
     private TokenTextSplitter tokenTextSplitter;
-    @Resource
-    private SimpleVectorStore simpleVectorStore;
     @Resource
     private PgVectorStore pgVectorStore;
 

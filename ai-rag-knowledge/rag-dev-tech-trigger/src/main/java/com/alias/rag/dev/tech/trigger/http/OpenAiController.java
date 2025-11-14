@@ -1,6 +1,13 @@
 package com.alias.rag.dev.tech.trigger.http;
 
 import com.alias.rag.dev.tech.api.IAiService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import org.springframework.ai.chat.ChatResponse;
 import org.springframework.ai.chat.messages.Message;
@@ -20,6 +27,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+@Tag(name = "OpenAI AI 接口", description = "基于 OpenAI API 的 AI 对话接口")
 @RestController()
 @CrossOrigin("*")
 @RequestMapping("/api/v1/openai/")
@@ -30,9 +38,22 @@ public class OpenAiController implements IAiService {
     @Resource
     private PgVectorStore pgVectorStore;
 
+    @Operation(
+            summary = "生成 AI 回复（同步）",
+            description = "使用指定的 OpenAI 模型同步生成 AI 回复。该接口会等待模型生成完整回复后返回结果。"
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "成功生成回复",
+                    content = @Content(schema = @Schema(implementation = ChatResponse.class))),
+            @ApiResponse(responseCode = "500", description = "服务器内部错误")
+    })
     @RequestMapping(value = "generate", method = RequestMethod.GET)
     @Override
-    public ChatResponse generate(@RequestParam("model") String model, @RequestParam("message") String message) {
+    public ChatResponse generate(
+            @Parameter(description = "OpenAI 模型名称，例如：gpt-4o、gpt-3.5-turbo", required = true, example = "gpt-4o")
+            @RequestParam("model") String model,
+            @Parameter(description = "用户输入的消息内容", required = true, example = "1+1等于多少？")
+            @RequestParam("message") String message) {
         return chatClient.call(new Prompt(
                 message,
                 OpenAiChatOptions.builder()
@@ -41,12 +62,22 @@ public class OpenAiController implements IAiService {
         ));
     }
 
-    /**
-     * curl http://localhost:8090/api/v1/openai/generate_stream?model=gpt-4o&message=1+1
-     */
+    @Operation(
+            summary = "生成 AI 回复（流式）",
+            description = "使用指定的 OpenAI 模型以流式方式生成 AI 回复。该接口会实时返回模型生成的文本片段，适用于需要实时显示回复的场景。"
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "成功开始流式生成",
+                    content = @Content(schema = @Schema(implementation = Flux.class))),
+            @ApiResponse(responseCode = "500", description = "服务器内部错误")
+    })
     @RequestMapping(value = "generate_stream", method = RequestMethod.GET)
     @Override
-    public Flux<ChatResponse> generateStream(@RequestParam("model") String model, @RequestParam("message") String message) {
+    public Flux<ChatResponse> generateStream(
+            @Parameter(description = "OpenAI 模型名称，例如：gpt-4o、gpt-3.5-turbo", required = true, example = "gpt-4o")
+            @RequestParam("model") String model,
+            @Parameter(description = "用户输入的消息内容", required = true, example = "1+1")
+            @RequestParam("message") String message) {
         return chatClient.stream(new Prompt(
                 message,
                 OpenAiChatOptions.builder()
@@ -55,9 +86,24 @@ public class OpenAiController implements IAiService {
         ));
     }
 
+    @Operation(
+            summary = "基于 RAG 生成 AI 回复（流式）",
+            description = "结合 RAG（检索增强生成）技术，从知识库中检索相关文档，然后使用指定的 OpenAI 模型以流式方式生成 AI 回复。该接口会先从向量数据库中检索与问题相关的文档，然后将这些文档作为上下文提供给模型。回复内容将使用中文。"
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "成功开始流式生成",
+                    content = @Content(schema = @Schema(implementation = Flux.class))),
+            @ApiResponse(responseCode = "500", description = "服务器内部错误")
+    })
     @RequestMapping(value = "generate_stream_rag", method = RequestMethod.GET)
     @Override
-    public Flux<ChatResponse> generateStreamRag(@RequestParam("model") String model, @RequestParam("ragTag") String ragTag, @RequestParam("message") String message) {
+    public Flux<ChatResponse> generateStreamRag(
+            @Parameter(description = "OpenAI 模型名称，例如：gpt-4o、gpt-3.5-turbo", required = true, example = "gpt-4o")
+            @RequestParam("model") String model,
+            @Parameter(description = "RAG 知识库标签，用于筛选特定知识库的文档", required = true, example = "java-knowledge")
+            @RequestParam("ragTag") String ragTag,
+            @Parameter(description = "用户输入的问题", required = true, example = "什么是 Spring Boot？")
+            @RequestParam("message") String message) {
 
         String SYSTEM_PROMPT = """
                 Use the information from the DOCUMENTS section to provide accurate answers but act as if you knew this information innately.

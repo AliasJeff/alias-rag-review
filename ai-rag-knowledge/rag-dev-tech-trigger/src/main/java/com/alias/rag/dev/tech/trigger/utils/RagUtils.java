@@ -26,6 +26,7 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Component
@@ -79,7 +80,6 @@ public class RagUtils {
     }
 
     public void indexRepositoryFilesIncremental(Path repoPath, String repoName, Git git) throws IOException {
-
         // 允许索引的文件类型
         Set<String> ALLOWED = Set.of(
                 ".md", ".txt", ".java", ".js", ".ts", ".go", ".py", ".kt",
@@ -116,60 +116,39 @@ public class RagUtils {
                 df.setRepository(repository);
                 List<DiffEntry> diffs = df.scan(oldRev.getTree(), newRev.getTree());
 
-                List<String> idsToDelete = new ArrayList<>();
-
                 for (DiffEntry diff : diffs) {
                     DiffEntry.ChangeType type = diff.getChangeType();
                     String path;
 
                     switch (type) {
                         case ADD:
+                            path = diff.getNewPath();
+                            if (!ALLOWED.stream().anyMatch(path.toLowerCase()::endsWith)) continue;
+                            indexFile(repoPath, repoName, path);
+                            break;
+
                         case MODIFY:
                             path = diff.getNewPath();
                             if (!ALLOWED.stream().anyMatch(path.toLowerCase()::endsWith)) continue;
 
-                            Path filePath = repoPath.resolve(path);
-                            log.info("[{}] Indexing {} file: {}", repoName, type, path);
-                            try {
-                                TikaDocumentReader reader = new TikaDocumentReader(new PathResource(filePath));
-                                List<Document> docs = reader.get();
-                                List<Document> chunks = tokenTextSplitter.apply(docs);
+                            // 先查出对应文档并删除
+                            String docId = repoName + ":" + path.replace("\\", "/");
+                            deleteDocumentById(docId);
 
-                                for (Document d : chunks) {
-                                    String docId = repoName + ":" + path.replace("\\", "/");
-                                    d.getMetadata().put("id", docId);
-                                    d.getMetadata().put("repo", repoName);
-                                }
-
-                                pgVectorStore.accept(chunks);
-
-                            } catch (Exception e) {
-                                log.error("Failed to index file {}: {}", path, e.getMessage());
-                            }
+                            // 再插入新向量
+                            indexFile(repoPath, repoName, path);
                             break;
 
                         case DELETE:
                             path = diff.getOldPath();
-                            String docId = repoName + ":" + path.replace("\\", "/");
-                            idsToDelete.add(docId);
-                            log.info("[{}] Scheduled delete vector for removed file: {}", repoName, path);
+                            String delDocId = repoName + ":" + path.replace("\\", "/");
+                            deleteDocumentById(delDocId);
+                            log.info("[{}] Deleted vector for removed file: {}", repoName, path);
                             break;
 
                         default:
                             break;
                     }
-                }
-
-                // 执行向量删除（Spring AI 1.0 新写法）
-                if (!idsToDelete.isEmpty()) {
-
-                    // 构建 metadata.id in ["a","b","c"] 的 filter
-                    Filter.Expression filter = new FilterExpressionBuilder()
-                            .in("id", idsToDelete)
-                            .build();
-                    pgVectorStore.delete(filter);
-
-                    log.info("[{}] Deleted {} vectors for removed files", repoName, idsToDelete.size());
                 }
             }
         }
@@ -179,6 +158,42 @@ public class RagUtils {
         log.info("Updated last indexed commit for {}: {}", repoName, headCommit);
     }
 
+    /** 删除指定 docId 对应的向量 */
+    private void deleteDocumentById(String docId) {
+        SearchRequest request = SearchRequest.builder()
+                .query("search all")
+                .topK(1)
+                .filterExpression(new FilterExpressionBuilder().eq("id", docId).build())
+                .build();
+
+        List<Document> documents = pgVectorStore.similaritySearch(request);
+        if (!documents.isEmpty()) {
+            List<String> ids = documents.stream().map(Document::getId).collect(Collectors.toList());
+            pgVectorStore.delete(ids);
+            log.info("Deleted document by id: {}", docId);
+        }
+    }
+
+    /** 索引单个文件 */
+    private void indexFile(Path repoPath, String repoName, String path) {
+        Path filePath = repoPath.resolve(path);
+        log.info("[{}] Indexing file: {}", repoName, path);
+        try {
+            TikaDocumentReader reader = new TikaDocumentReader(new PathResource(filePath));
+            List<Document> docs = reader.get();
+            List<Document> chunks = tokenTextSplitter.apply(docs);
+
+            for (Document d : chunks) {
+                String docId = repoName + ":" + path.replace("\\", "/");
+                d.getMetadata().put("id", docId);
+                d.getMetadata().put("repo", repoName);
+            }
+
+            pgVectorStore.accept(chunks);
+        } catch (Exception e) {
+            log.error("Failed to index file {}: {}", path, e.getMessage());
+        }
+    }
     /**
      * 删除指定仓库的最后索引 commit 信息，以及对应向量
      */

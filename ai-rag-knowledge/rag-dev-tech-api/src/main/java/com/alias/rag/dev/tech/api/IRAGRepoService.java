@@ -6,11 +6,11 @@ import java.util.List;
 
 public interface IRAGRepoService {
 
-    Response<String> registerRepo(String repoUrl, String branch);
+    Response<String> registerRepo(String repoUrl, String branch) throws Exception;
 
     Response<String> syncRepo(String repoName);
 
-    Response<String> deleteRepo(String repoName);
+    Response<String> deleteRepo(String repoName) throws Exception;
 
     Response<String> codeReviewContext(String repoName, String code);
 

@@ -6,7 +6,7 @@ spring:
     driver-class-name: org.postgresql.Driver
     username: postgres
     password: postgres
-    url: jdbc:postgresql://192.168.1.109:15432/ai-rag-knowledge
+    url: jdbc:postgresql://127.0.0.1:15432/ai-rag-knowledge
     type: com.zaxxer.hikari.HikariDataSource
     # hikari连接池配置
     hikari:
@@ -28,24 +28,24 @@ spring:
       connection-test-query: SELECT 1
   ai:
     ollama:
-      base-url: http://192.168.1.109:11434
+      base-url: http://127.0.0.1:11434
       embedding:
         options:
           num-batch: 512
-        model: qwen3-embedding
+        model: qwen3-embedding:0.6b
     openai:
-      base-url: https://pro-share-aws-api.zcyai.com/
-      api-key: sk-eEyfxptPgbfXd3Z164260740E0494161Bd8**
+      base-url: https://api.openai.com/v1/chat/completions
+      api-key: sk-******
       embedding-model: text-embedding-ada-002
     rag:
-      embed: qwen3-embedding #qwen3-embedding、text-embedding-ada-002
+      embed: qwen3-embedding:0.6b #qwen3-embedding、text-embedding-ada-002
 
 
 # Redis
 redis:
   sdk:
     config:
-      host: 192.168.1.109
+      host: 127.0.0.1
       port: 16379
       pool-size: 10
       min-idle-size: 5
@@ -56,7 +56,23 @@ redis:
       ping-interval: 60000
       keep-alive: true
 
+github:
+  username: AliasJeff
+  token: "ghp_YWeT********"
+
+repo:
+  basePath: "./data/repos"
+
 logging:
   level:
     root: info
   config: classpath:logback-spring.xml
+
+springdoc:
+  api-docs:
+    enabled: true
+    path: /v3/api-docs
+  swagger-ui:
+    enabled: true
+    path: /swagger-ui.html
+  packages-to-scan: com.alias.rag.dev.tech.trigger.http

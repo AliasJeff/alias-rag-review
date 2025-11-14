@@ -14,7 +14,9 @@ import org.eclipse.jgit.util.io.DisabledOutputStream;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.reader.tika.TikaDocumentReader;
 import org.springframework.ai.transformer.splitter.TokenTextSplitter;
-import org.springframework.ai.vectorstore.PgVectorStore;
+import org.springframework.ai.vectorstore.filter.Filter;
+import org.springframework.ai.vectorstore.filter.FilterExpressionBuilder;
+import org.springframework.ai.vectorstore.pgvector.PgVectorStore;
 import org.springframework.core.io.PathResource;
 import org.springframework.stereotype.Component;
 
@@ -57,7 +59,6 @@ public class RagUtils {
 
                 Path relativePath = repoPath.relativize(file);
                 String filePath = relativePath.toString().replace("\\", "/");
-                String docId = repoName + ":" + filePath;
 
                 try {
                     TikaDocumentReader reader = new TikaDocumentReader(new PathResource(file));
@@ -65,7 +66,7 @@ public class RagUtils {
                     List<Document> chunks = tokenTextSplitter.apply(docs);
 
                     chunks.forEach(d -> {
-                        d.getMetadata().put("knowledge", repoName);
+                        d.getMetadata().put("repo", repoName);
                         d.getMetadata().put("id", filePath);
                     });
 
@@ -137,12 +138,10 @@ public class RagUtils {
                                 List<Document> docs = reader.get();
                                 List<Document> chunks = tokenTextSplitter.apply(docs);
 
-                                List<String> fileIdList = new ArrayList<>();
                                 for (Document d : chunks) {
                                     String docId = repoName + ":" + path.replace("\\", "/");
-                                    fileIdList.add(docId);
-                                    d.getMetadata().put("id", docId);          // 用 metadata 记录 id
-                                    d.getMetadata().put("knowledge", repoName);
+                                    d.getMetadata().put("id", docId);
+                                    d.getMetadata().put("repo", repoName);
                                 }
 
                                 pgVectorStore.accept(chunks);
@@ -164,10 +163,15 @@ public class RagUtils {
                     }
                 }
 
-                // 删除被删除的文件向量
+                // 执行向量删除（Spring AI 1.0 新写法）
                 if (!idsToDelete.isEmpty()) {
-                    // FIXME: idsToDelete 是 metaData 中的值
-                    pgVectorStore.delete(idsToDelete);
+
+                    // 构建 metadata.id in ["a","b","c"] 的 filter
+                    Filter.Expression filter = new FilterExpressionBuilder()
+                            .in("id", idsToDelete)
+                            .build();
+                    pgVectorStore.delete(filter);
+
                     log.info("[{}] Deleted {} vectors for removed files", repoName, idsToDelete.size());
                 }
             }

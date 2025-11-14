@@ -1,23 +1,22 @@
 package com.alias.rag.dev.tech.test;
 
-import com.alibaba.fastjson.JSON;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.springframework.ai.chat.ChatResponse;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
-import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.chat.prompt.SystemPromptTemplate;
 import org.springframework.ai.document.Document;
-import org.springframework.ai.ollama.OllamaChatClient;
-import org.springframework.ai.ollama.api.OllamaOptions;
+import org.springframework.ai.rag.Query;
+import org.springframework.ai.rag.retrieval.search.DocumentRetriever;
+import org.springframework.ai.rag.retrieval.search.VectorStoreDocumentRetriever;
 import org.springframework.ai.reader.tika.TikaDocumentReader;
 import org.springframework.ai.transformer.splitter.TokenTextSplitter;
-import org.springframework.ai.vectorstore.PgVectorStore;
 import org.springframework.ai.vectorstore.SearchRequest;
-import org.springframework.ai.vectorstore.SimpleVectorStore;
+import org.springframework.ai.vectorstore.filter.Filter;
+import org.springframework.ai.vectorstore.filter.FilterExpressionBuilder;
+import org.springframework.ai.vectorstore.pgvector.PgVectorStore;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.junit4.SpringRunner;
 
@@ -63,10 +62,10 @@ public class RAGTest {
                     {documents}
                 """;
 
-        SearchRequest request = SearchRequest.query(message).withTopK(5).withFilterExpression("knowledge == 'ai-rag-knowledge'");
+        SearchRequest request = SearchRequest.builder().query(message).topK(5).filterExpression("knowledge == 'ai-rag-knowledge'").build();
 
         List<Document> documents = pgVectorStore.similaritySearch(request);
-        String documentsCollectors = documents.stream().map(Document::getContent).collect(Collectors.joining());
+        String documentsCollectors = documents.stream().map(Document::getFormattedContent).collect(Collectors.joining());
 
         Message ragMessage = new SystemPromptTemplate(SYSTEM_PROMPT).createMessage(Map.of("documents", documentsCollectors));
 
@@ -76,6 +75,56 @@ public class RAGTest {
 
         log.info("message: {}", messages);
 
+    }
+
+    @Test
+    public void test_testAddDocuments() {
+        // 模拟创建几个文档
+        List<Document> docs = new ArrayList<>();
+        for (int i = 1; i <= 3; i++) {
+            Document doc = new Document("Content of doc " + i);
+            doc.getMetadata().put("id", "test-doc-" + i);
+            doc.getMetadata().put("knowledge", "test-repo");
+            docs.add(doc);
+        }
+
+        // 调用 add
+        pgVectorStore.add(docs);
+
+        System.out.println("Added documents: " + docs.size());
+    }
+
+    @Test
+    public void test_testQueryDocuments() {
+        // 构建过滤表达式：knowledge == "test-repo"
+        FilterExpressionBuilder builder = new FilterExpressionBuilder();
+        Filter.Expression filter = builder.eq("knowledge", "test-repo").build();
+
+        SearchRequest request = SearchRequest.builder().query("search all").topK(5).filterExpression(filter).build();
+
+        List<Document> documents = pgVectorStore.similaritySearch(request);
+        System.out.println("Found documents: " + documents.size());
+        for (Document doc : documents) {
+            System.out.println("Doc id: " + doc.getMetadata().get("id"));
+            System.out.println("Content: " + doc.getFormattedContent());
+        }
+    }
+
+    @Test
+    public void test_testDeleteDocuments() {
+        // 模拟需要删除的 docId
+        List<String> idsToDelete = List.of("test-doc-1", "test-doc-2");
+
+        // 构建 filter
+        FilterExpressionBuilder builder = new FilterExpressionBuilder();
+        Filter.Expression filter = builder.or(
+                builder.eq("id", idsToDelete.get(0)),
+                builder.eq("id", idsToDelete.get(1))
+        ).build();
+
+        pgVectorStore.delete(filter);
+
+        System.out.println("Deleted documents with filter: " + filter);
     }
 
 }

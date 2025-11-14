@@ -17,11 +17,9 @@ import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
 import org.redisson.api.RList;
 import org.redisson.api.RedissonClient;
 import org.springframework.ai.document.Document;
-import org.springframework.ai.ollama.OllamaChatClient;
 import org.springframework.ai.reader.tika.TikaDocumentReader;
 import org.springframework.ai.transformer.splitter.TokenTextSplitter;
-import org.springframework.ai.vectorstore.PgVectorStore;
-import org.springframework.ai.vectorstore.SimpleVectorStore;
+import org.springframework.ai.vectorstore.pgvector.PgVectorStore;
 import org.springframework.core.io.PathResource;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -32,8 +30,8 @@ import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.List;
 
-@Tag(name = "RAG 知识库管理接口", description = "RAG（检索增强生成）知识库的管理接口，包括知识库查询、文件上传和 Git 仓库分析等功能")
 @Slf4j
+@Tag(name = "RAG 知识库管理接口", description = "RAG（检索增强生成）知识库的管理接口，包括知识库查询、文件上传和 Git 仓库分析等功能")
 @RestController()
 @CrossOrigin("*")
 @RequestMapping("/api/v1/rag/")

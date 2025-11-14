@@ -12,9 +12,7 @@ import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.web.bind.annotation.CrossOrigin;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 import com.alias.rag.dev.tech.api.IRAGRepoService;
 
@@ -45,8 +43,9 @@ public class RAGRepoController implements IRAGRepoService {
     @Resource
     private GitUtils gitUtils;
 
+    @RequestMapping(value="register-repo", method = RequestMethod.POST)
     @Override
-    public Response<String> registerRepo(String repoUrl, String branch) throws Exception {
+    public Response<String> registerRepo(@RequestParam("repoUrl") String repoUrl, @RequestParam("branch") String branch) throws Exception {
 
         // 1. 提取仓库名，例如 chatgpt-framework
         String repoName = GitUtils.extractProjectName(repoUrl);
@@ -97,8 +96,10 @@ public class RAGRepoController implements IRAGRepoService {
         }
     }
 
+
+    @RequestMapping(value="sync-repo", method = RequestMethod.POST)
     @Override
-    public Response<String> syncRepo(String repoName) {
+    public Response<String> syncRepo(@RequestParam("repoName") String repoName) {
         Path repoPath = Paths.get(repoBasePath, repoName);
         File localDir = repoPath.toFile();
 
@@ -137,7 +138,7 @@ public class RAGRepoController implements IRAGRepoService {
             log.info("Changes detected, indexing updated files for {}", repoName);
 
             // 3. 找出新增或修改文件（简单策略：索引所有文件，也可改为 diff）
-            ragUtils.indexRepositoryFiles(repoPath, repoName);
+            ragUtils.indexRepositoryFilesIncremental(repoPath, repoName, git);
 
             // 4. 更新 commit
             gitUtils.saveIndexedCommit(repoName, currentCommit);
@@ -159,20 +160,23 @@ public class RAGRepoController implements IRAGRepoService {
         }
     }
 
+    @RequestMapping(value="delete-repo", method = RequestMethod.POST)
     @Override
-    public Response<String> deleteRepo(String repoName) throws Exception {
+    public Response<String> deleteRepo(@RequestParam("repoName") String repoName) throws Exception {
         String localPath = "./git-cloned-repo/" + repoName;
         FileUtils.deleteDirectory(new File(localPath));
         return null;
     }
 
+    @RequestMapping(value="review-context", method = RequestMethod.GET)
     @Override
-    public Response<String> codeReviewContext(String repoName, String code) {
+    public Response<String> codeReviewContext(@RequestParam("repoName") String repoName, @RequestParam("code") String code) {
         return null;
     }
 
+    @RequestMapping(value="tag-list", method = RequestMethod.GET)
     @Override
-    public Response<List<String>> queryTagList(String repoName) {
+    public Response<List<String>> queryTagList(@RequestParam("repoName") String repoName) {
         return null;
     }
 

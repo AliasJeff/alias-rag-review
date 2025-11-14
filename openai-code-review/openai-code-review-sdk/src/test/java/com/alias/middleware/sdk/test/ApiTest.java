@@ -24,12 +24,6 @@ public class ApiTest {
         System.out.println("GITHUB_PR_NUMBER=" + info.prNumber);
     }
 
-    public static void main(String[] args) {
-        String apiKeySecret = "c78fbacd3e10118ad5649d7a54a3a163.UunYDBxpzeClvSKZ";
-        String token = BearerTokenUtils.getToken(apiKeySecret);
-        System.out.println(token);
-    }
-
     @Test
     public void test_reviewPullRequest() {
         AppConfig cfg = AppConfig.getInstance();
@@ -51,6 +45,8 @@ public class ApiTest {
         ReviewPullRequestService reviewPullRequestService = new ReviewPullRequestService(gitCommand, openAI);
         reviewPullRequestService.setModel(ModelEnum.GPT_4O);
         reviewPullRequestService.exec(url);
+
+        System.out.println("AI Code review success!");
     }
 
 }

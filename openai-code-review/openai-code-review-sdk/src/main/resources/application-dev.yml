@@ -1,5 +1,5 @@
 server:
-  port: 8090
+  port: 8080
 
 spring:
 
@@ -22,3 +22,12 @@ commit:
   branch: "main"
   author: "local"
   message: "code review"
+
+springdoc:
+  api-docs:
+    enabled: true
+    path: /v3/api-docs
+  swagger-ui:
+    enabled: true
+    path: /swagger-ui.html
+  packages-to-scan: com.alias.middleware.sdk.domain.controller

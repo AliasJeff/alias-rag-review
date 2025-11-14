@@ -37,7 +37,7 @@ public class RAGTest {
 
     @Test
     public void upload() {
-        TikaDocumentReader reader = new TikaDocumentReader("./data/file.text");
+        TikaDocumentReader reader = new TikaDocumentReader("ai-rag-knowledge/data/file.text");
 
         List<Document> documents = reader.get();
         List<Document> documentSplitterList = tokenTextSplitter.apply(documents);
@@ -84,7 +84,7 @@ public class RAGTest {
         for (int i = 1; i <= 3; i++) {
             Document doc = new Document("Content of doc " + i);
             doc.getMetadata().put("id", "test-doc-" + i);
-            doc.getMetadata().put("knowledge", "test-repo");
+            doc.getMetadata().put("repo", "test-repo");
             docs.add(doc);
         }
 
@@ -96,9 +96,9 @@ public class RAGTest {
 
     @Test
     public void test_testQueryDocuments() {
-        // 构建过滤表达式：knowledge == "test-repo"
+        // 构建过滤表达式：repo == "test-repo"
         FilterExpressionBuilder builder = new FilterExpressionBuilder();
-        Filter.Expression filter = builder.eq("knowledge", "test-repo").build();
+        Filter.Expression filter = builder.eq("repo", "test-repo").build();
 
         SearchRequest request = SearchRequest.builder().query("search all").topK(5).filterExpression(filter).build();
 

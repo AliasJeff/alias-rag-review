@@ -61,7 +61,7 @@ github:
   token: "ghp_YWeT********"
 
 repo:
-  basePath: "./data/repos"
+  basePath: "ai-rag-knowledge/data/repos"
 
 logging:
   level:

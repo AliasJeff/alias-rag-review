@@ -3,7 +3,6 @@ package com.alias.rag.dev.tech.trigger.utils;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.eclipse.jgit.api.Git;
-import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.diff.DiffEntry;
 import org.eclipse.jgit.diff.DiffFormatter;
 import org.eclipse.jgit.lib.ObjectId;
@@ -14,6 +13,7 @@ import org.eclipse.jgit.util.io.DisabledOutputStream;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.reader.tika.TikaDocumentReader;
 import org.springframework.ai.transformer.splitter.TokenTextSplitter;
+import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.filter.Filter;
 import org.springframework.ai.vectorstore.filter.FilterExpressionBuilder;
 import org.springframework.ai.vectorstore.pgvector.PgVectorStore;
@@ -21,10 +21,7 @@ import org.springframework.core.io.PathResource;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
-import java.nio.file.FileVisitResult;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.SimpleFileVisitor;
+import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.List;
@@ -81,7 +78,7 @@ public class RagUtils {
         });
     }
 
-    public void indexRepositoryFilesIncremental(Path repoPath, String repoName, Git git) throws IOException, GitAPIException {
+    public void indexRepositoryFilesIncremental(Path repoPath, String repoName, Git git) throws IOException {
 
         // 允许索引的文件类型
         Set<String> ALLOWED = Set.of(
@@ -180,6 +177,59 @@ public class RagUtils {
         // 3. 更新 commit
         gitUtils.saveIndexedCommit(repoName, headCommit);
         log.info("Updated last indexed commit for {}: {}", repoName, headCommit);
+    }
+
+    /**
+     * 删除指定仓库的最后索引 commit 信息，以及对应向量
+     */
+    public void deleteIndexedCommit(String repoName) throws IOException {
+        // 删除仓库所有向量
+        Filter.Expression filter = new FilterExpressionBuilder()
+                .eq("repo", repoName)
+                .build();
+        pgVectorStore.delete(filter);
+        log.info("Deleted all vectors for repository {}", repoName);
+    }
+
+    /**
+     * 根据代码片段返回上下文信息（检索向量库匹配片段）
+     */
+    public String reviewCodeContext(String repoName, String code) throws IOException {
+        // 1. 将代码分块
+        Document doc = new Document(code);
+        List<Document> chunks = tokenTextSplitter.apply(List.of(doc));
+
+        List<String> results = new ArrayList<>();
+
+        for (Document chunk : chunks) {
+            // 2. 构建过滤条件：knowledge == repoName
+            FilterExpressionBuilder builder = new FilterExpressionBuilder();
+            Filter.Expression filter = builder.eq("repo", repoName).build();
+
+            // 3. 构建搜索请求
+            SearchRequest request = SearchRequest.builder()
+                    .query(chunk.getText())
+                    .topK(5)
+                    .filterExpression(filter)
+                    .build();
+
+            // 4. 执行相似度搜索
+            List<Document> matched = pgVectorStore.similaritySearch(request);
+            for (Document m : matched) {
+                results.add(m.getFormattedContent());
+            }
+        }
+
+        // 5. 拼接返回上下文
+        return String.join("\n---\n", results);
+    }
+
+    /**
+     * 获取仓库的 Git tag 列表
+     */
+    public List<String> getRepositoryTags(String repoName) throws IOException {
+        List<String> tags = new ArrayList<>();
+        return tags;
     }
 
 }

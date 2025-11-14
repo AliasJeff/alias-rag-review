@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.*;
 import com.alias.rag.dev.tech.api.IRAGRepoService;
 
 import java.io.File;
+import java.io.IOException;
 import java.nio.file.*;
 import java.util.List;
 
@@ -160,24 +161,99 @@ public class RAGRepoController implements IRAGRepoService {
         }
     }
 
-    @RequestMapping(value="delete-repo", method = RequestMethod.POST)
+    @RequestMapping(value = "delete-repo", method = RequestMethod.POST)
     @Override
-    public Response<String> deleteRepo(@RequestParam("repoName") String repoName) throws Exception {
-        String localPath = "./git-cloned-repo/" + repoName;
-        FileUtils.deleteDirectory(new File(localPath));
-        return null;
+    public Response<String> deleteRepo(@RequestParam("repoName") String repoName) {
+        String localPath = Paths.get(repoBasePath, repoName).toString();
+        File dir = new File(localPath);
+
+        if (!dir.exists()) {
+            return Response.<String>builder()
+                    .code("4001")
+                    .info("Repository does not exist: " + repoName)
+                    .build();
+        }
+
+        try {
+            FileUtils.deleteDirectory(dir);
+            log.info("Deleted repository: {}", repoName);
+
+            // 同时删除索引记录
+            ragUtils.deleteIndexedCommit(repoName);
+            return Response.<String>builder()
+                    .code("0000")
+                    .info("Repository deleted successfully")
+                    .build();
+        } catch (IOException e) {
+            log.error("Failed to delete repository {}: {}", repoName, e.getMessage());
+            return Response.<String>builder()
+                    .code("5000")
+                    .info("Delete failed: " + e.getMessage())
+                    .build();
+        }
     }
 
-    @RequestMapping(value="review-context", method = RequestMethod.GET)
+    @RequestMapping(value = "review-context", method = RequestMethod.GET)
     @Override
-    public Response<String> codeReviewContext(@RequestParam("repoName") String repoName, @RequestParam("code") String code) {
-        return null;
+    public Response<String> codeReviewContext(@RequestParam("repoName") String repoName,
+                                              @RequestParam("code") String code) {
+        Path repoPath = Paths.get(repoBasePath, repoName);
+        File localDir = repoPath.toFile();
+
+        if (!localDir.exists()) {
+            return Response.<String>builder()
+                    .code("4001")
+                    .info("Repository does not exist: " + repoName)
+                    .build();
+        }
+
+        try {
+            // 简单示例：这里调用 ragUtils 做代码分析
+            String reviewResult = ragUtils.reviewCodeContext(repoName, code);
+
+            return Response.<String>builder()
+                    .code("0000")
+                    .info("Code review completed")
+                    .data(reviewResult)
+                    .build();
+        } catch (Exception e) {
+            log.error("Failed to review code in {}: {}", repoName, e.getMessage());
+            return Response.<String>builder()
+                    .code("5000")
+                    .info("Code review failed: " + e.getMessage())
+                    .build();
+        }
     }
 
-    @RequestMapping(value="tag-list", method = RequestMethod.GET)
+    @RequestMapping(value = "tag-list", method = RequestMethod.GET)
     @Override
     public Response<List<String>> queryTagList(@RequestParam("repoName") String repoName) {
-        return null;
+        Path repoPath = Paths.get(repoBasePath, repoName);
+        File localDir = repoPath.toFile();
+
+        if (!localDir.exists()) {
+            return Response.<List<String>>builder()
+                    .code("4001")
+                    .info("Repository does not exist: " + repoName)
+                    .build();
+        }
+
+        try {
+            // 简单示例：从 ragUtils 获取 tag 列表
+            List<String> tags = ragUtils.getRepositoryTags(repoName);
+
+            return Response.<List<String>>builder()
+                    .code("0000")
+                    .info("Tag list retrieved")
+                    .data(tags)
+                    .build();
+        } catch (Exception e) {
+            log.error("Failed to query tags for {}: {}", repoName, e.getMessage());
+            return Response.<List<String>>builder()
+                    .code("5000")
+                    .info("Query tag list failed: " + e.getMessage())
+                    .build();
+        }
     }
 
 }

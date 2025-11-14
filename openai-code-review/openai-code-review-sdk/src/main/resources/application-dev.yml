@@ -15,6 +15,8 @@ openai:
   apiKey: ""
 github:
   token: ""
+rag:
+  apiBaseUrl: http://localhost:8080/api/v1/rag/repo
 commit:
   project: "repo"
   branch: "main"

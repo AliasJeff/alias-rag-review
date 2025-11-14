@@ -16,6 +16,8 @@ openai:
 github:
   reviewLogUri: ""
   token: ""
+rag:
+  apiBaseUrl: http://localhost:8080/api/v1/rag/repo
 commit:
   project: ""
   branch: ""

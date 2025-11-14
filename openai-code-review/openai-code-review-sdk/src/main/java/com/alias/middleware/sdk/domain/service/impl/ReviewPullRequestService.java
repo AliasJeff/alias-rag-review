@@ -23,6 +23,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -119,10 +120,22 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
             logger.warn("Failed to parse unified diff; fallback to raw diff. err={}", e.toString());
             structuredJson = mapper.writeValueAsString(new ArrayList<>()); // 空数组占位，避免 null
         }
+        
+        // 从 RAG 获取 context（使用原始diff文本，因为RAG需要提取代码内容进行检索）
+        String ragContext = "";
+        try {
+            ragContext = getRagContext(safeDiff);
+            logger.info("Retrieved RAG context. contextSize={}", ragContext != null ? ragContext.length() : 0);
+        } catch (Exception e) {
+            logger.warn("Failed to get RAG context, continuing without it. err={}", e.getMessage());
+            // 如果获取 RAG context 失败，继续执行，但不使用 context
+        }
+        
         String basePrompt = ReviewPrompts.PR_REVIEW_PROMPT;
-        // 将占位符替换为结构化 JSON；如果调用方的提示词仍期望原始 diff，可在提示词中同时保留两个占位符
+        // 将占位符替换为结构化 JSON 和 RAG context
         String mergedPrompt = basePrompt
-                .replace("<Git diff>", structuredJson);
+                .replace("<Git diff>", structuredJson)
+                .replace("<RAG context>", ragContext != null && !ragContext.isEmpty() ? ragContext : "No additional context available.");
         if (mergedPrompt.length() <= MAX_PROMPT_CHARS) {
             ChatCompletionRequestDTO chatCompletionRequest = new ChatCompletionRequestDTO();
             chatCompletionRequest.setModel(this.model != null ? this.model : ModelEnum.GPT_4O.getCode());
@@ -230,6 +243,103 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
     }
 
     // Removed file-based prompt loader; prompt is provided by ReviewPrompts class.
+
+    /**
+     * 从 RAG 服务获取代码上下文
+     *
+     * @param code 代码内容（原始diff文本）
+     * @return RAG context 字符串
+     * @throws Exception 如果调用RAG接口失败
+     */
+    private String getRagContext(String code) throws Exception {
+        if (this.repository == null || this.repository.isEmpty()) {
+            logger.warn("Repository is empty, cannot get RAG context");
+            return "";
+        }
+        
+        // 从 repository 中提取 repoName（格式：owner/repo，提取 repo 部分）
+        String repoName = extractRepoName(this.repository);
+        if (repoName == null || repoName.isEmpty()) {
+            logger.warn("Cannot extract repoName from repository: {}", this.repository);
+            return "";
+        }
+        
+        // 获取 RAG 服务 URL
+        String ragBaseUrl = AppConfig.getInstance().getString("rag", "apiBaseUrl");
+        if (ragBaseUrl == null || ragBaseUrl.isEmpty()) {
+            logger.warn("RAG API base URL is not configured");
+            return "";
+        }
+        
+        // 限制代码长度以避免URL长度限制（大多数浏览器/服务器限制URL长度为2048字符）
+        // 这里我们限制为1000字符，给URL的其他部分留出空间
+        final int MAX_CODE_LENGTH = 1000;
+        String codeToSend = code;
+        if (code != null && code.length() > MAX_CODE_LENGTH) {
+            logger.warn("Code is too long ({} chars), truncating to {} chars for RAG API call", code.length(), MAX_CODE_LENGTH);
+            codeToSend = code.substring(0, MAX_CODE_LENGTH);
+        }
+        
+        // 构建 RAG 接口 URL
+        String apiUrl = ragBaseUrl + "/review-context?repoName=" + URLEncoder.encode(repoName, StandardCharsets.UTF_8)
+                + "&code=" + URLEncoder.encode(codeToSend, StandardCharsets.UTF_8);
+        
+        logger.info("Calling RAG API to get context. repoName={}, codeSize={}", repoName, codeToSend != null ? codeToSend.length() : 0);
+        
+        URL url = new URL(apiUrl);
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+        conn.setRequestMethod("GET");
+        conn.setRequestProperty("Accept", "application/json");
+        conn.setConnectTimeout(10000); // 10 seconds
+        conn.setReadTimeout(30000); // 30 seconds
+        
+        int httpCode = conn.getResponseCode();
+        if (httpCode / 100 != 2) {
+            String errMsg = IoUtils.readStreamSafely(conn.getErrorStream());
+            throw new RuntimeException("RAG API call failed, code=" + httpCode + ", err=" + errMsg);
+        }
+        
+        // 解析响应
+        String responseBody = IoUtils.readStreamSafely(conn.getInputStream());
+        ObjectMapper mapper = new ObjectMapper();
+        JsonNode root = mapper.readTree(responseBody);
+        
+        // 检查响应code
+        String responseCode = ReviewJsonUtils.safeText(root, "code");
+        if (!"0000".equals(responseCode)) {
+            String info = ReviewJsonUtils.safeText(root, "info");
+            logger.warn("RAG API returned non-success code: {}, info: {}", responseCode, info);
+            return "";
+        }
+        
+        // 提取data字段
+        String context = ReviewJsonUtils.safeText(root, "data");
+        if (context == null || context.isEmpty()) {
+            logger.warn("RAG API returned empty context");
+            return "";
+        }
+        
+        logger.info("Successfully retrieved RAG context. contextSize={}", context.length());
+        return context;
+    }
+    
+    /**
+     * 从 repository 字符串中提取 repoName
+     * 格式：owner/repo，返回 repo 部分
+     *
+     * @param repository repository 字符串，格式：owner/repo
+     * @return repoName
+     */
+    private String extractRepoName(String repository) {
+        if (repository == null || repository.isEmpty()) {
+            return null;
+        }
+        int lastSlash = repository.lastIndexOf('/');
+        if (lastSlash >= 0 && lastSlash < repository.length() - 1) {
+            return repository.substring(lastSlash + 1);
+        }
+        return repository;
+    }
 
     private String postCommentToGithubPr(String body) throws Exception {
         String repo = this.repository;

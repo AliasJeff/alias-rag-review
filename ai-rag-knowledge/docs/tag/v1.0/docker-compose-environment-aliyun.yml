@@ -6,7 +6,7 @@ services:
   # 运行模型
   # ollama run deepseek-r1:1.5b
   # 联网模型
-  # ollama pull nomic-embed-text
+  # ollama pull qwen3-embedding:0.6b
   ollama:
     image: registry.cn-hangzhou.aliyuncs.com/xfg-studio/ollama:0.5.10
     container_name: ollama

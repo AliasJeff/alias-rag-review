@@ -8,11 +8,9 @@ import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.springframework.ai.document.Document;
-import org.springframework.ai.ollama.OllamaChatClient;
 import org.springframework.ai.reader.tika.TikaDocumentReader;
 import org.springframework.ai.transformer.splitter.TokenTextSplitter;
-import org.springframework.ai.vectorstore.PgVectorStore;
-import org.springframework.ai.vectorstore.SimpleVectorStore;
+import org.springframework.ai.vectorstore.pgvector.PgVectorStore;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.core.io.PathResource;
 import org.springframework.test.context.junit4.SpringRunner;
@@ -29,11 +27,7 @@ import java.util.List;
 public class JGitTest {
 
     @Resource
-    private OllamaChatClient ollamaChatClient;
-    @Resource
     private TokenTextSplitter tokenTextSplitter;
-    @Resource
-    private SimpleVectorStore simpleVectorStore;
     @Resource
     private PgVectorStore pgVectorStore;
 

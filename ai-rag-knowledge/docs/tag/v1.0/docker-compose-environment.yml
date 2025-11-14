@@ -1,12 +1,13 @@
 # docker-comopse -f docker-compose-environment.yml up -d
-version: '3'
+name: ai-rag-knowledge
+
 services:
   # 对话模型
   # ollama pull deepseek-r1:1.5b
   # 运行模型
   # ollama run deepseek-r1:1.5b
   # 联网模型
-  # ollama pull nomic-embed-text
+  # ollama pull qwen3-embedding:0.6b
   ollama:
     image: ollama/ollama:0.5.10
     container_name: ollama

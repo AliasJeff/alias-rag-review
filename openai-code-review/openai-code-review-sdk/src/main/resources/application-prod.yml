@@ -1,12 +1,8 @@
 server:
-  port: 8090
+  port: 8080
 
 spring:
 
-logging:
-  level:
-    root: info
-  config: classpath:logback-spring.xml
 chatglm:
   apiHost: https://open.bigmodel.cn/api/paas/v4/chat/completions
   apiKeySecret: ""
@@ -16,8 +12,24 @@ openai:
 github:
   reviewLogUri: ""
   token: ""
+rag:
+  apiBaseUrl: http://localhost:8080/api/v1/rag/repo
 commit:
   project: ""
   branch: ""
   author: ""
   message: ""
+
+logging:
+  level:
+    root: info
+  config: classpath:logback-spring.xml
+
+springdoc:
+  api-docs:
+    enabled: true
+    path: /v3/api-docs
+  swagger-ui:
+    enabled: true
+    path: /swagger-ui.html
+  packages-to-scan: com.alias.middleware.sdk.domain.controller

@@ -1,4 +1,4 @@
-package com.alias.rag.dev.tech.trigger.dto;
+package com.alias.rag.dev.tech.api.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
@@ -23,5 +23,8 @@ public class RagRepoDTO implements Serializable {
 
     @Schema(description = "搜索代码", example = "String name = \"name\";")
     private String searchCode;
+
+    @Schema(description = "代码内容（用于代码审查上下文）", example = "public class Test { ... }")
+    private String code;
 
 }

@@ -162,7 +162,7 @@ public class RagUtils {
     private void deleteDocumentById(String docId) {
         SearchRequest request = SearchRequest.builder()
                 .query("search all")
-                .topK(1)
+                .topK(10)
                 .filterExpression(new FilterExpressionBuilder().eq("id", docId).build())
                 .build();
 

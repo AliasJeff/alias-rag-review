@@ -117,27 +117,22 @@ public class RAGTest {
         // 模拟需要删除的 docId
         List<String> idsToDelete = List.of("test-doc-1", "test-doc-2", "test-doc-3");
 
+        List<String> docIds = new ArrayList<>();
+
         for (String id : idsToDelete) {
             SearchRequest request = SearchRequest.builder()
                     .query("search all")
                     .topK(1)
                     .filterExpression(new FilterExpressionBuilder().eq("id", id).build())
                     .build();
+
             List<Document> documents = pgVectorStore.similaritySearch(request);
-
-            List<String> docIds = documents.stream().map(Document::getId).collect(Collectors.toList());
-            log.info("docIds: {}", docIds);
-
-            pgVectorStore.delete(docIds);
+            docIds.addAll(documents.stream().map(Document::getId).collect(Collectors.toList()));
         }
 
-//        // 构建 filter
-//        FilterExpressionBuilder builder = new FilterExpressionBuilder();
-//        Filter.Expression filter = builder.in("id", String.join(",", idsToDelete)).build();
-//
-//        pgVectorStore.delete(filter);
-//
-//        System.out.println("Deleted documents with filter: " + filter);
+        log.info("docIds: {}", docIds);
+
+        pgVectorStore.delete(docIds);
     }
 
 }

@@ -12,8 +12,11 @@ public final class ReviewPrompts {
      * summary, and selective inline comments with severity and optional suggestions.
      */
     public static final String PR_REVIEW_PROMPT = ""
-            + "You are a senior code review expert. You will receive \"structured PR change JSON\".\n"
-            + "Please conduct a comprehensive code review based on this structured change with the following requirements:\n"
+            + "You are a senior code review expert. You will receive \"structured PR change JSON\" and \"RAG context\" from the knowledge base.\n"
+            + "Please conduct a comprehensive code review based on this structured change and the RAG context with the following requirements:\n"
+            + "\n"
+            + "RAG Context (from knowledge base):\n"
+            + "<RAG context>\n"
             + "\n"
             + "1) Give the entire PR an overall score (overall_score), an integer from 0~100, representing code quality and risk. Higher scores indicate better quality.\n"
             + "2) Provide a PR change summary (summary), highlighting modules, files, functional points, major interface/data structure changes, and potential impacts.\n"
@@ -36,6 +39,7 @@ public final class ReviewPrompts {
             + "      { \"type\": \"add\"|\"delete\", \"oldLine\": number|null, \"newLine\": number|null, \"content\": string }\n"
             + "    ], \"context\": { \"oldText\": string, \"newText\": string }, \"linesChanged\": number }\n"
             + "- Where newLine is the line number in head/RIGHT; type=add means added lines (only newLine), type=delete means deleted lines (only oldLine).\n"
+            + "- The RAG context provides additional information from the knowledge base that may help you understand the codebase better, including related code patterns, conventions, and historical context.\n"
             + "\n"
             + "Strict requirements for line numbers and file positioning (must be followed):\n"
             + "- comments.line must correspond to the line number space of head (RIGHT), i.e., use the above changes[].newLine.\n"

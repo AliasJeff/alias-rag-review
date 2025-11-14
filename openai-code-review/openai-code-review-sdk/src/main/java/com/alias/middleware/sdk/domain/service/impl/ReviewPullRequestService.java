@@ -25,8 +25,10 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 
 public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
 
@@ -109,38 +111,165 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
         logger.info("Submitting diff to LLM for review. model={}, diffSize={}", this.model != null ? this.model : ModelEnum.GPT_4O.getCode(), diffCode != null ? diffCode.length() : 0);
         final int MAX_PROMPT_CHARS = 180_000; // 粗略上限，避免超出供应商限制
         String safeDiff = diffCode == null ? "" : diffCode;
-        // 使用 VCSUtils 将 diff 解析为结构化对象，并以 JSON 形式传给模型
         ObjectMapper mapper = new ObjectMapper();
-        String structuredJson;
+        
+        // 使用 VCSUtils 将 diff 解析为结构化对象
+        List<VCSUtils.FileChanges> files;
         try {
-            List<VCSUtils.FileChanges> files = VCSUtils.parseUnifiedDiff(safeDiff);
-            structuredJson = mapper.writeValueAsString(files);
+            files = VCSUtils.parseUnifiedDiff(safeDiff);
         } catch (Exception e) {
             logger.warn("Failed to parse unified diff; fallback to raw diff. err={}", e.toString());
-            structuredJson = mapper.writeValueAsString(new ArrayList<>()); // 空数组占位，避免 null
+            files = new ArrayList<>(); // 空列表占位，避免 null
         }
-        String basePrompt = ReviewPrompts.PR_REVIEW_PROMPT;
-        // 将占位符替换为结构化 JSON；如果调用方的提示词仍期望原始 diff，可在提示词中同时保留两个占位符
-        String mergedPrompt = basePrompt
-                .replace("<Git diff>", structuredJson);
-        if (mergedPrompt.length() <= MAX_PROMPT_CHARS) {
-            ChatCompletionRequestDTO chatCompletionRequest = new ChatCompletionRequestDTO();
-            chatCompletionRequest.setModel(this.model != null ? this.model : ModelEnum.GPT_4O.getCode());
-            chatCompletionRequest.setMessages(new ArrayList<ChatCompletionRequestDTO.Prompt>() {
-                private static final long serialVersionUID = -7988151926241837899L;
-                {
-                    add(new ChatCompletionRequestDTO.Prompt("user", mergedPrompt));
+
+        if (files.isEmpty()) {
+            logger.warn("No files found in diff, returning empty review");
+            return mapper.writeValueAsString(createEmptyReview());
+        }
+
+        // 遍历每个文件，分别进行review
+        List<JsonNode> fileReviews = new ArrayList<>();
+        int totalScore = 0;
+        int validScoreCount = 0;
+        List<String> summaries = new ArrayList<>();
+        List<JsonNode> allComments = new ArrayList<>();
+
+        logger.info("Starting per-file review. totalFiles={}", files.size());
+        for (int i = 0; i < files.size(); i++) {
+            VCSUtils.FileChanges file = files.get(i);
+            logger.info("Reviewing file {}/{}. path={}", i + 1, files.size(), file.path);
+            
+            try {
+                // 从 RAG 获取 context（使用原始diff文本，因为RAG需要提取代码内容进行检索）
+                String ragContext = getRagContext(safeDiff);
+
+                // 对单个文件进行review
+                String fileReviewJson = reviewSingleFile(file, ragContext, MAX_PROMPT_CHARS);
+                
+                // 解析单个文件的review结果
+                JsonNode fileReview;
+                try {
+                    fileReview = mapper.readTree(fileReviewJson);
+                } catch (Exception parseErr) {
+                    logger.warn("Failed to parse file review JSON, attempting to extract. file={}, err={}", file.path, parseErr.toString());
+                    String cleaned = ReviewJsonUtils.extractJsonPayload(fileReviewJson);
+                    fileReview = mapper.readTree(cleaned);
                 }
-            });
-            logger.debug("Request: {}", chatCompletionRequest);
-            ChatCompletionSyncResponseDTO completions = openAI.completions(chatCompletionRequest);
-            ChatCompletionSyncResponseDTO.Message message = completions.getChoices().get(0).getMessage();
-            logger.info("Received review response from LLM. contentSize={}", message != null && message.getContent() != null ? message.getContent().length() : 0);
-            logger.debug("Review response: {}", message.getContent());
-            return message.getContent();
+                
+                fileReviews.add(fileReview);
+                
+                // 提取score
+                Integer score = ReviewJsonUtils.safeInt(fileReview, "overall_score");
+                if (score != null) {
+                    totalScore += score;
+                    validScoreCount++;
+                }
+                
+                // 提取summary
+                String summary = ReviewJsonUtils.safeText(fileReview, "summary");
+                if (summary != null && !summary.isEmpty()) {
+                    summaries.add(String.format("[%s] %s", file.path, summary));
+                }
+                
+                // 提取comments
+                JsonNode comments = fileReview.get("comments");
+                if (comments != null && comments.isArray()) {
+                    Iterator<JsonNode> it = comments.elements();
+                    while (it.hasNext()) {
+                        allComments.add(it.next());
+                    }
+                }
+                
+                logger.info("Completed review for file {}/{}. path={}, score={}", i + 1, files.size(), file.path, score);
+            } catch (Exception e) {
+                logger.error("Failed to review file. path={}, err={}", file.path, e.toString(), e);
+                // 继续处理下一个文件，不中断整个流程
+            }
         }
-        logger.warn("Prompt too large for single request; chunked processing has been disabled.");
-        throw new RuntimeException("Prompt too large for single request; please reduce diff size.");
+
+        // 整合所有文件的review结果
+        int overallScore = validScoreCount > 0 ? totalScore / validScoreCount : 0;
+        String combinedSummary = summaries.isEmpty() 
+            ? "No summary available." 
+            : String.join("\n\n", summaries);
+        
+        // 将 JsonNode 列表转换为 Map 列表，确保正确序列化
+        List<Map<String, Object>> commentsList = new ArrayList<>();
+        for (JsonNode comment : allComments) {
+            Map<String, Object> commentMap = mapper.convertValue(comment, Map.class);
+            commentsList.add(commentMap);
+        }
+        
+        // 构建最终的整合结果
+        Map<String, Object> mergedReview = new HashMap<>();
+        mergedReview.put("overall_score", overallScore);
+        mergedReview.put("summary", combinedSummary);
+        mergedReview.put("general_review", "This review was generated by reviewing each file separately and merging the results.");
+        mergedReview.put("comments", commentsList);
+        
+        String finalResult = mapper.writeValueAsString(mergedReview);
+        logger.info("Completed per-file review. totalFiles={}, overallScore={}, totalComments={}", 
+            files.size(), overallScore, allComments.size());
+        return finalResult;
+    }
+
+    /**
+     * 对单个文件进行review
+     *
+     * @param file 文件变更对象
+     * @param ragContext RAG上下文
+     * @param maxPromptChars 最大prompt字符数限制
+     * @return review结果的JSON字符串
+     * @throws Exception 如果review失败
+     */
+    private String reviewSingleFile(VCSUtils.FileChanges file, String ragContext, int maxPromptChars) throws Exception {
+        ObjectMapper mapper = new ObjectMapper();
+        
+        // 将单个文件转换为JSON
+        List<VCSUtils.FileChanges> singleFileList = new ArrayList<>();
+        singleFileList.add(file);
+        String structuredJson = mapper.writeValueAsString(singleFileList);
+
+        String basePrompt = ReviewPrompts.PR_REVIEW_PROMPT;
+        // 将占位符替换为结构化 JSON 和 RAG context
+        String mergedPrompt = basePrompt
+                .replace("<Git diff>", structuredJson)
+                .replace("<RAG context>", ragContext != null && !ragContext.isEmpty() ? ragContext : "No additional context available.");
+        
+        if (mergedPrompt.length() > maxPromptChars) {
+            logger.warn("Prompt too large for single file. file={}, promptSize={}, maxSize={}", 
+                file.path, mergedPrompt.length(), maxPromptChars);
+            throw new RuntimeException("Prompt too large for file: " + file.path);
+        }
+
+        ChatCompletionRequestDTO chatCompletionRequest = new ChatCompletionRequestDTO();
+        chatCompletionRequest.setModel(this.model != null ? this.model : ModelEnum.GPT_4O.getCode());
+        chatCompletionRequest.setMessages(new ArrayList<ChatCompletionRequestDTO.Prompt>() {
+            private static final long serialVersionUID = -7988151926241837899L;
+            {
+                add(new ChatCompletionRequestDTO.Prompt("user", mergedPrompt));
+            }
+        });
+        
+        logger.debug("Request for file: {}", file.path);
+        ChatCompletionSyncResponseDTO completions = openAI.completions(chatCompletionRequest);
+        ChatCompletionSyncResponseDTO.Message message = completions.getChoices().get(0).getMessage();
+        logger.debug("Review response for file: {}, contentSize={}", 
+            file.path, message != null && message.getContent() != null ? message.getContent().length() : 0);
+        
+        return message.getContent();
+    }
+
+    /**
+     * 创建空的review结果
+     */
+    private Map<String, Object> createEmptyReview() {
+        Map<String, Object> review = new HashMap<>();
+        review.put("overall_score", 0);
+        review.put("summary", "No changes found in diff.");
+        review.put("general_review", "");
+        review.put("comments", new ArrayList<>());
+        return review;
     }
 
     @Override
@@ -230,6 +359,106 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
     }
 
     // Removed file-based prompt loader; prompt is provided by ReviewPrompts class.
+
+    /**
+     * 从 RAG 服务获取代码上下文
+     *
+     * @param code 代码内容（原始diff文本）
+     * @return RAG context 字符串
+     * @throws Exception 如果调用RAG接口失败
+     */
+    private String getRagContext(String code) throws Exception {
+        if (this.repository == null || this.repository.isEmpty()) {
+            logger.warn("Repository is empty, cannot get RAG context");
+            return "";
+        }
+        
+        // 从 repository 中提取 repoName（格式：owner/repo，提取 repo 部分）
+        String repoName = extractRepoName(this.repository);
+        if (repoName == null || repoName.isEmpty()) {
+            logger.warn("Cannot extract repoName from repository: {}", this.repository);
+            return "";
+        }
+        
+        // 获取 RAG 服务 URL
+        String ragBaseUrl = AppConfig.getInstance().getString("rag", "apiBaseUrl");
+        if (ragBaseUrl == null || ragBaseUrl.isEmpty()) {
+            logger.warn("RAG API base URL is not configured");
+            return "";
+        }
+        
+        // 构建 RAG 接口 URL
+        String apiUrl = ragBaseUrl + "/review-context";
+        
+        logger.info("Calling RAG API to get context. repoName={}, codeSize={}", repoName, code != null ? code.length() : 0);
+        
+        // 构建请求体 JSON
+        ObjectMapper mapper = new ObjectMapper();
+        Map<String, Object> requestMap = new HashMap<>();
+        requestMap.put("repoName", repoName);
+        requestMap.put("code", code != null ? code : "");
+        String requestBody = mapper.writeValueAsString(requestMap);
+        
+        URL url = new URL(apiUrl);
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+        conn.setRequestMethod("POST");
+        conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+        conn.setRequestProperty("Accept", "application/json");
+        conn.setDoOutput(true);
+        conn.setConnectTimeout(10000); // 10 seconds
+        conn.setReadTimeout(30000); // 30 seconds
+        
+        // 发送请求体
+        try (OutputStream os = conn.getOutputStream()) {
+            os.write(requestBody.getBytes(StandardCharsets.UTF_8));
+        }
+        
+        int httpCode = conn.getResponseCode();
+        if (httpCode / 100 != 2) {
+            String errMsg = IoUtils.readStreamSafely(conn.getErrorStream());
+            throw new RuntimeException("RAG API call failed, code=" + httpCode + ", err=" + errMsg);
+        }
+        
+        // 解析响应
+        String responseBody = IoUtils.readStreamSafely(conn.getInputStream());
+        JsonNode root = mapper.readTree(responseBody);
+        
+        // 检查响应code
+        String responseCode = ReviewJsonUtils.safeText(root, "code");
+        if (!"0000".equals(responseCode)) {
+            String info = ReviewJsonUtils.safeText(root, "info");
+            logger.warn("RAG API returned non-success code: {}, info: {}", responseCode, info);
+            return "";
+        }
+        
+        // 提取data字段
+        String context = ReviewJsonUtils.safeText(root, "data");
+        if (context == null || context.isEmpty()) {
+            logger.warn("RAG API returned empty context");
+            return "";
+        }
+        
+        logger.info("Successfully retrieved RAG context. contextSize={}", context.length());
+        return context;
+    }
+    
+    /**
+     * 从 repository 字符串中提取 repoName
+     * 格式：owner/repo，返回 repo 部分
+     *
+     * @param repository repository 字符串，格式：owner/repo
+     * @return repoName
+     */
+    private String extractRepoName(String repository) {
+        if (repository == null || repository.isEmpty()) {
+            return null;
+        }
+        int lastSlash = repository.lastIndexOf('/');
+        if (lastSlash >= 0 && lastSlash < repository.length() - 1) {
+            return repository.substring(lastSlash + 1);
+        }
+        return repository;
+    }
 
     private String postCommentToGithubPr(String body) throws Exception {
         String repo = this.repository;

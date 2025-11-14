@@ -1,5 +1,6 @@
 package com.alias.rag.dev.tech.trigger.http;
 
+import com.alias.rag.dev.tech.api.dto.RagRepoDTO;
 import com.alias.rag.dev.tech.api.response.Response;
 import com.alias.rag.dev.tech.trigger.utils.GitUtils;
 import com.alias.rag.dev.tech.trigger.utils.RagUtils;
@@ -46,7 +47,10 @@ public class RAGRepoController implements IRAGRepoService {
 
     @RequestMapping(value="register-repo", method = RequestMethod.POST)
     @Override
-    public Response<String> registerRepo(@RequestParam("repoUrl") String repoUrl, @RequestParam("branch") String branch) throws Exception {
+    public Response<String> registerRepo(@RequestBody RagRepoDTO ragRepoDTO) throws Exception {
+
+        String repoUrl = ragRepoDTO.getRepoUrl();
+        String branch = ragRepoDTO.getBranch();
 
         // 1. 提取仓库名，例如 chatgpt-framework
         String repoName = GitUtils.extractProjectName(repoUrl);
@@ -100,7 +104,15 @@ public class RAGRepoController implements IRAGRepoService {
 
     @RequestMapping(value="sync-repo", method = RequestMethod.POST)
     @Override
-    public Response<String> syncRepo(@RequestParam("repoName") String repoName) {
+    public Response<String> syncRepo(@RequestBody RagRepoDTO ragRepoDTO) {
+        String repoName = ragRepoDTO.getRepoName();
+        if (repoName == null || repoName.isEmpty()) {
+            return Response.<String>builder()
+                    .code("4000")
+                    .info("Repository name is required")
+                    .build();
+        }
+
         Path repoPath = Paths.get(repoBasePath, repoName);
         File localDir = repoPath.toFile();
 
@@ -163,7 +175,15 @@ public class RAGRepoController implements IRAGRepoService {
 
     @RequestMapping(value = "delete-repo", method = RequestMethod.POST)
     @Override
-    public Response<String> deleteRepo(@RequestParam("repoName") String repoName) {
+    public Response<String> deleteRepo(@RequestBody RagRepoDTO ragRepoDTO) {
+        String repoName = ragRepoDTO.getRepoName();
+        if (repoName == null || repoName.isEmpty()) {
+            return Response.<String>builder()
+                    .code("4000")
+                    .info("Repository name is required")
+                    .build();
+        }
+
         String localPath = Paths.get(repoBasePath, repoName).toString();
         File dir = new File(localPath);
 
@@ -193,10 +213,26 @@ public class RAGRepoController implements IRAGRepoService {
         }
     }
 
-    @RequestMapping(value = "review-context", method = RequestMethod.GET)
+    @RequestMapping(value = "review-context", method = RequestMethod.POST)
     @Override
-    public Response<String> codeReviewContext(@RequestParam("repoName") String repoName,
-                                              @RequestParam("code") String code) {
+    public Response<String> codeReviewContext(@RequestBody RagRepoDTO ragRepoDTO) {
+        String repoName = ragRepoDTO.getRepoName();
+        String code = ragRepoDTO.getCode();
+        
+        if (repoName == null || repoName.isEmpty()) {
+            return Response.<String>builder()
+                    .code("4000")
+                    .info("Repository name is required")
+                    .build();
+        }
+        
+        if (code == null || code.isEmpty()) {
+            return Response.<String>builder()
+                    .code("4000")
+                    .info("Code is required")
+                    .build();
+        }
+
         Path repoPath = Paths.get(repoBasePath, repoName);
         File localDir = repoPath.toFile();
 
@@ -225,9 +261,17 @@ public class RAGRepoController implements IRAGRepoService {
         }
     }
 
-    @RequestMapping(value = "tag-list", method = RequestMethod.GET)
+    @RequestMapping(value = "tag-list", method = RequestMethod.POST)
     @Override
-    public Response<List<String>> queryTagList(@RequestParam("repoName") String repoName) {
+    public Response<List<String>> queryTagList(@RequestBody RagRepoDTO ragRepoDTO) {
+        String repoName = ragRepoDTO.getRepoName();
+        if (repoName == null || repoName.isEmpty()) {
+            return Response.<List<String>>builder()
+                    .code("4000")
+                    .info("Repository name is required")
+                    .build();
+        }
+
         Path repoPath = Paths.get(repoBasePath, repoName);
         File localDir = repoPath.toFile();
 

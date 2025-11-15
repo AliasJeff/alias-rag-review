@@ -4,7 +4,6 @@ import com.alias.domain.model.ChatContext;
 import com.alias.domain.model.ChatRequest;
 import com.alias.domain.model.Response;
 import com.alias.domain.service.IAiConversationService;
-import com.alias.domain.service.impl.AiConversationService;
 import org.springframework.ai.chat.model.ChatResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;

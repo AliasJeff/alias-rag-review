@@ -27,8 +27,9 @@ export const useMessages = (conversationId: string | null) => {
       if (!conversationId) return;
 
       try {
-        const newMessage = await messageApi.sendMessage(
+        const newMessage = await messageApi.createMessage(
           conversationId,
+          "user",
           content
         );
         setMessages((prev) => [...prev, newMessage]);

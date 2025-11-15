@@ -1,14 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useChat, useClientUser, useConversations } from "@/hooks";
 import { ChatArea, Sidebar } from "@/components";
-import { useConversations, useMessages, useClientUser } from "@/hooks";
-import styles from "./page.module.css";
+import styles from "../page.module.css";
 
-export default function Home() {
+export default function ChatPage() {
   const [activeConversationId, setActiveConversationId] = useState<
     string | null
   >(null);
+  const [useStreamMode, setUseStreamMode] = useState(true);
+
   const {
     clientUser,
     loading: clientUserLoading,
@@ -23,11 +25,29 @@ export default function Home() {
     updateConversationStatus,
     deleteConversation,
   } = useConversations(clientUser?.clientIdentifier);
+
   const {
+    conversationId,
+    setConversationId,
     messages,
-    loading: messagesLoading,
-    sendMessage,
-  } = useMessages(activeConversationId);
+    loading,
+    streaming,
+    error,
+    chat,
+    chatStream,
+    stopStream,
+    clearContext,
+  } = useChat({
+    conversationId: activeConversationId || undefined,
+    userId: clientUser?.id || "",
+  });
+
+  // Sync active conversation with chat hook
+  useEffect(() => {
+    if (activeConversationId) {
+      setConversationId(activeConversationId);
+    }
+  }, [activeConversationId, setConversationId]);
 
   const handleCreateConversation = async () => {
     try {
@@ -69,15 +89,34 @@ export default function Home() {
   };
 
   const handleSendMessage = async (content: string) => {
-    if (!activeConversationId) {
+    if (!activeConversationId && !conversationId) {
       console.warn("No conversation selected");
       return;
     }
+
     try {
-      await sendMessage(content);
+      if (useStreamMode) {
+        await chatStream(content);
+      } else {
+        await chat(content);
+      }
     } catch (err) {
       console.error("Failed to send message:", err);
     }
+  };
+
+  const handleClearContext = async () => {
+    if (confirm("确定要清空对话历史吗？")) {
+      try {
+        await clearContext();
+      } catch (err) {
+        console.error("Failed to clear context:", err);
+      }
+    }
+  };
+
+  const handleStopStream = () => {
+    stopStream();
   };
 
   // Show loading state while initializing client user
@@ -136,8 +175,14 @@ export default function Home() {
       <ChatArea
         messages={messages}
         onSendMessage={handleSendMessage}
-        loading={messagesLoading}
-        disabled={!activeConversationId}
+        loading={loading || streaming}
+        disabled={!activeConversationId && !conversationId}
+        streaming={streaming}
+        onStopStream={handleStopStream}
+        onClearContext={handleClearContext}
+        error={error}
+        useStreamMode={useStreamMode}
+        onToggleStreamMode={setUseStreamMode}
       />
     </div>
   );

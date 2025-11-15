@@ -8,63 +8,30 @@ const isDev = process.env.NODE_ENV === "development";
  * - prod 模式 Node.js 发出请求
  */
 export function createHttpClient(): AxiosInstance {
-  if (isDev && typeof window !== "undefined") {
-    // 浏览器端 fetch 封装
-    const fetchClient = axios.create({
-      baseURL: process.env.NEXT_PUBLIC_API_URL,
-      timeout: 30000,
-    });
+  const client = axios.create({
+    baseURL: process.env.NEXT_PUBLIC_API_URL,
+    timeout: 30000,
+  });
 
-    fetchClient.interceptors.request.use((config) => {
-      console.log("[DEV HTTP Request]", {
-        method: config.method?.toUpperCase(),
-        url: config.url,
-        params: config.params,
-        data: config.data,
-        timestamp: new Date().toISOString(),
-      });
+  client.interceptors.request.use(
+    (config) => {
       return config;
-    });
+    },
+    (error) => Promise.reject(error)
+  );
 
-    fetchClient.interceptors.response.use((response: AxiosResponse) => {
-      console.log("[DEV HTTP Response]", {
-        status: response.status,
-        url: response.config.url,
-        data: response.data,
-        timestamp: new Date().toISOString(),
-      });
+  client.interceptors.response.use(
+    (response) => {
+      const { data } = response;
+      if (data?.code !== "0000") {
+        throw new Error(data?.message || data?.info);
+      }
       return response;
-    });
+    },
+    (error) => Promise.reject(error)
+  );
 
-    return fetchClient;
-  } else {
-    // 生产或 SSR 使用普通 axios
-    const client = axios.create({
-      baseURL: process.env.NEXT_PUBLIC_API_URL,
-      timeout: 30000,
-    });
-
-    client.interceptors.request.use(
-      (config) => {
-        console.log("[HTTP Request]", {
-          method: config.method?.toUpperCase(),
-          url: config.url,
-          params: config.params,
-          data: config.data,
-          timestamp: new Date().toISOString(),
-        });
-        return config;
-      },
-      (error) => Promise.reject(error)
-    );
-
-    client.interceptors.response.use(
-      (response) => response,
-      (error) => Promise.reject(error)
-    );
-
-    return client;
-  }
+  return client;
 }
 
 export const httpClient = createHttpClient();

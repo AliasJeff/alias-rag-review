@@ -6,22 +6,55 @@ import { ApiResponse, Message } from "@/types";
  */
 export const messageApi = {
   /**
-   * 获取会话中的所有消息
+   * 创建消息
    */
-  async getMessages(conversationId: string): Promise<Message[]> {
-    const response = await httpClient.get<ApiResponse<Message[]>>(
-      `/api/v1/conversations/${conversationId}/messages`
+  async createMessage(
+    conversationId: string,
+    role: "user" | "assistant",
+    content: string
+  ): Promise<Message> {
+    const response = await httpClient.post<ApiResponse<Message>>(
+      "/api/v1/messages",
+      {
+        conversationId,
+        role,
+        content,
+      }
     );
     return response.data.data;
   },
 
   /**
-   * 发送消息
+   * 获取消息详情
    */
-  async sendMessage(conversationId: string, content: string): Promise<Message> {
-    const response = await httpClient.post<ApiResponse<Message>>(
-      `/api/v1/conversations/${conversationId}/messages`,
-      { content }
+  async getMessage(messageId: string): Promise<Message> {
+    const response = await httpClient.get<ApiResponse<Message>>(
+      `/api/v1/messages/${messageId}`
+    );
+    return response.data.data;
+  },
+
+  /**
+   * 获取会话中的所有消息
+   */
+  async getMessages(conversationId: string): Promise<Message[]> {
+    const response = await httpClient.get<ApiResponse<Message[]>>(
+      `/api/v1/messages/conversation/${conversationId}`
+    );
+    return response.data.data;
+  },
+
+  /**
+   * 分页获取会话消息
+   */
+  async getMessagesPaginated(
+    conversationId: string,
+    limit: number = 20,
+    offset: number = 0
+  ): Promise<Message[]> {
+    const response = await httpClient.get<ApiResponse<Message[]>>(
+      `/api/v1/messages/conversation/${conversationId}/paginated`,
+      { params: { limit, offset } }
     );
     return response.data.data;
   },
@@ -29,26 +62,29 @@ export const messageApi = {
   /**
    * 删除消息
    */
-  async deleteMessage(
-    conversationId: string,
-    messageId: string
-  ): Promise<void> {
-    await httpClient.delete(
-      `/api/v1/conversations/${conversationId}/messages/${messageId}`
+  async deleteMessage(messageId: string): Promise<string> {
+    const response = await httpClient.delete<ApiResponse<string>>(
+      `/api/v1/messages/${messageId}`
     );
+    return response.data.data;
   },
 
   /**
-   * 编辑消息
+   * 删除会话的所有消息
    */
-  async editMessage(
-    conversationId: string,
-    messageId: string,
-    content: string
-  ): Promise<Message> {
-    const response = await httpClient.put<ApiResponse<Message>>(
-      `/api/v1/conversations/${conversationId}/messages/${messageId}`,
-      { content }
+  async deleteConversationMessages(conversationId: string): Promise<string> {
+    const response = await httpClient.delete<ApiResponse<string>>(
+      `/api/v1/messages/conversation/${conversationId}`
+    );
+    return response.data.data;
+  },
+
+  /**
+   * 获取消息数量
+   */
+  async getMessageCount(conversationId: string): Promise<number> {
+    const response = await httpClient.get<ApiResponse<number>>(
+      `/api/v1/messages/conversation/${conversationId}/count`
     );
     return response.data.data;
   },

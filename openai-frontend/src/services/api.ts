@@ -7,3 +7,4 @@ export { conversationApi } from "./modules/conversation";
 export { messageApi } from "./modules/message";
 export { modelApi } from "./modules/model";
 export { clientUserApi } from "./modules/clientUser";
+export { chatApi } from "./modules/chat";

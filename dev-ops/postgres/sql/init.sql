@@ -6,6 +6,8 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pg_trgm";
 
+CREATE EXTENSION IF NOT EXISTS "vector";
+
 -- ===========================================================
 -- 客户端用户表（替代 user 表）
 -- 使用浏览器 localStorage 生成的 UUID 标识不同用户
@@ -46,8 +48,8 @@ CREATE TABLE IF NOT EXISTS conversations (
 CREATE TABLE IF NOT EXISTS messages (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-    `role` VARCHAR(50) NOT NULL,        -- user/assistant/system
-    `type` VARCHAR(50) DEFAULT 'text',  -- text/code/analysis
+    role VARCHAR(50) NOT NULL,        -- user/assistant/system
+    type VARCHAR(50) DEFAULT 'text',  -- text/code/analysis
     content TEXT NOT NULL,
     metadata JSONB DEFAULT '{}'::jsonb,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP

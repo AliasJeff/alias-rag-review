@@ -2,6 +2,18 @@ server:
   port: 8080
 
 spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/openai_code_review
+    username: postgres
+    password: postgres
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 5
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+      auto-commit: true
   ai:
     openai:
       api-key: "${OPENAI_API_KEY:}"
@@ -14,7 +26,6 @@ openai:
   apiHost: https://api.openai.com/v1/chat/completions
   apiKey: ""
 github:
-  reviewLogUri: ""
   token: ""
 rag:
   apiBaseUrl: http://localhost:8080/api/v1/rag/repo
@@ -24,10 +35,20 @@ commit:
   author: ""
   message: ""
 
-logging:
-  level:
-    root: info
-  config: classpath:logback-spring.xml
+mybatis:
+  mapper-locations: classpath:mapper/*.xml
+  type-aliases-package: com.alias.domain.model
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+    cache-enabled: true
+    lazy-loading-enabled: true
+    aggressive-lazy-loading: false
+    multiple-result-sets-enabled: true
+    use-column-label: true
+    use-generated-keys: true
+    default-executor-type: simple
+    default-statement-timeout: 25000
 
 springdoc:
   api-docs:
@@ -37,3 +58,8 @@ springdoc:
     enabled: true
     path: /swagger-ui.html
   packages-to-scan: com.alias.domain.controller
+
+logging:
+  level:
+    root: info
+  config: classpath:logback-spring.xml

@@ -14,13 +14,13 @@
     <!--输出到文件-->
     <!-- 时间滚动输出 level为 INFO 日志 -->
     <appender name="INFO_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
-        <file>../../../../data/log/log_info.log</file>
+        <file>data/log/log_info.log</file>
         <encoder>
             <pattern>%d{yy-MM-dd.HH:mm:ss.SSS} [%-16t] %-5p %-22c{0}%X{ServiceId} -%X{trace-id} %m%n</pattern>
             <charset>UTF-8</charset>
         </encoder>
         <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
-            <fileNamePattern>../../../../data/log/log-info-%d{yyyy-MM-dd}.%i.log</fileNamePattern>
+            <fileNamePattern>data/log/log-info-%d{yyyy-MM-dd}.%i.log</fileNamePattern>
             <timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
                 <maxFileSize>100MB</maxFileSize>
             </timeBasedFileNamingAndTriggeringPolicy>
@@ -30,13 +30,13 @@
     </appender>
 
     <appender name="ERROR_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
-        <file>../../../../data/log/log_error.log</file>
+        <file>data/log/log_error.log</file>
         <encoder>
             <pattern>%d{yy-MM-dd.HH:mm:ss.SSS} [%-16t] %-5p %-22c{0}%X{ServiceId} -%X{trace-id} %m%n</pattern>
             <charset>UTF-8</charset>
         </encoder>
         <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
-            <fileNamePattern>../../../../data/log/log-error-%d{yyyy-MM-dd}.%i.log</fileNamePattern>
+            <fileNamePattern>data/log/log-error-%d{yyyy-MM-dd}.%i.log</fileNamePattern>
             <timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
                 <maxFileSize>100MB</maxFileSize>
             </timeBasedFileNamingAndTriggeringPolicy>

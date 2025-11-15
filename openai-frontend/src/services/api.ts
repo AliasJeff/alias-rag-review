@@ -1,6 +1,13 @@
 import axios, { AxiosInstance } from "axios";
 import { ApiResponse, Conversation, Message, Model } from "@/types";
 
+export interface ClientUser {
+  id: string;
+  clientIdentifier: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 class ApiService {
   private client: AxiosInstance;
 
@@ -13,54 +20,51 @@ class ApiService {
 
   // 会话相关接口
   async getConversations(): Promise<Conversation[]> {
-    const response = await this.client.get<ApiResponse<Conversation[]>>(
-      "/conversations"
-    );
-    return response.data.data;
+    return null;
   }
 
   async createConversation(title: string): Promise<Conversation> {
-    const response = await this.client.post<ApiResponse<Conversation>>(
-      "/conversations",
-      { title }
-    );
-    return response.data.data;
+    return null;
   }
 
   async deleteConversation(id: string): Promise<void> {
-    await this.client.delete(`/conversations/${id}`);
+    return;
   }
 
   // 消息相关接口
   async getMessages(conversationId: string): Promise<Message[]> {
-    const response = await this.client.get<ApiResponse<Message[]>>(
-      `/conversations/${conversationId}/messages`
-    );
-    return response.data.data;
+    return null;
   }
 
   async sendMessage(conversationId: string, content: string): Promise<Message> {
-    const response = await this.client.post<ApiResponse<Message>>(
-      `/conversations/${conversationId}/messages`,
-      { content }
-    );
-    return response.data.data;
+    return null;
   }
 
   // 模型相关接口
   async getModels(): Promise<Model[]> {
-    const response = await this.client.get<ApiResponse<Model[]>>("/models");
-    return response.data.data;
+    return null;
   }
 
   // 配置相关接口
   async saveConfig(config: Record<string, any>): Promise<void> {
-    await this.client.post("/config", config);
+    return;
   }
 
   async getConfig(): Promise<Record<string, any>> {
-    const response = await this.client.get<ApiResponse<Record<string, any>>>(
-      "/config"
+    return null;
+  }
+
+  // 客户端用户相关接口
+  async getOrCreateClientUser(clientIdentifier: string): Promise<ClientUser> {
+    const response = await this.client.post<ApiResponse<ClientUser>>(
+      `/api/v1/client-users/get-or-create/${clientIdentifier}`
+    );
+    return response.data.data;
+  }
+
+  async getClientUserById(id: string): Promise<ClientUser> {
+    const response = await this.client.get<ApiResponse<ClientUser>>(
+      `/api/v1/client-users/${id}`
     );
     return response.data.data;
   }

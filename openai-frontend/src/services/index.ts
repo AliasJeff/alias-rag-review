@@ -1,1 +1,1 @@
-export { apiService } from "./api";
+export { apiService, type ClientUser } from "./api";

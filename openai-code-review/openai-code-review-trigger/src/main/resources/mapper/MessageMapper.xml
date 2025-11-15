@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.alias.infrastructure.mapper.IMessageRepository">
+
+    <resultMap id="messageResultMap" type="com.alias.domain.model.Message">
+        <id column="id" property="id" javaType="java.util.UUID" jdbcType="OTHER"/>
+        <result column="conversation_id" property="conversationId" javaType="java.util.UUID" jdbcType="OTHER"/>
+        <result column="role" property="role" jdbcType="VARCHAR"/>
+        <result column="type" property="type" jdbcType="VARCHAR"/>
+        <result column="content" property="content" jdbcType="VARCHAR"/>
+        <result column="metadata" property="metadata" jdbcType="OTHER"
+                typeHandler="com.alias.infrastructure.typehandler.JsonbTypeHandler"/>
+        <result column="created_at" property="createdAt" jdbcType="TIMESTAMP"/>
+    </resultMap>
+
+    <sql id="messageColumns">
+        id
+        , conversation_id, role, type, content, metadata, created_at
+    </sql>
+
+    <!-- Save message -->
+    <insert id="save" parameterType="com.alias.domain.model.Message" useGeneratedKeys="false">
+        INSERT INTO messages (id, conversation_id, role, type, content, metadata, created_at)
+        VALUES (#{id, javaType=java.util.UUID, jdbcType=OTHER},
+                #{conversationId, javaType=java.util.UUID, jdbcType=OTHER},
+                #{role, jdbcType=VARCHAR},
+                #{type, jdbcType=VARCHAR},
+                #{content, jdbcType=VARCHAR},
+                #{metadata, jdbcType=OTHER, typeHandler=com.alias.infrastructure.typehandler.JsonbTypeHandler},
+                #{createdAt, jdbcType=TIMESTAMP})
+    </insert>
+
+    <!-- Find by ID -->
+    <select id="findById" parameterType="java.util.UUID" resultMap="messageResultMap">
+        SELECT
+        <include refid="messageColumns"/>
+        FROM messages
+        WHERE id = #{id, javaType=java.util.UUID, jdbcType=OTHER}
+    </select>
+
+    <!-- Find by conversation ID (handles both with and without pagination) -->
+    <select id="findByConversationId" resultMap="messageResultMap">
+        SELECT
+        <include refid="messageColumns"/>
+        FROM messages
+        WHERE conversation_id = #{conversationId, javaType=java.util.UUID, jdbcType=OTHER}
+        ORDER BY created_at ASC
+        <if test="limit != null and offset != null">
+            LIMIT #{limit, jdbcType=INTEGER} OFFSET #{offset, jdbcType=INTEGER}
+        </if>
+    </select>
+
+    <!-- Find by conversation ID and role -->
+    <select id="findByConversationIdAndRole" resultMap="messageResultMap">
+        SELECT
+        <include refid="messageColumns"/>
+        FROM messages
+        WHERE conversation_id = #{conversationId, javaType=java.util.UUID, jdbcType=OTHER}
+        AND role = #{role, jdbcType=VARCHAR}
+        ORDER BY created_at ASC
+    </select>
+
+    <!-- Delete by ID -->
+    <delete id="deleteById" parameterType="java.util.UUID">
+        DELETE
+        FROM messages
+        WHERE id = #{id, javaType=java.util.UUID, jdbcType=OTHER}
+    </delete>
+
+    <!-- Delete by conversation ID -->
+    <delete id="deleteByConversationId" parameterType="java.util.UUID">
+        DELETE
+        FROM messages
+        WHERE conversation_id = #{conversationId, javaType=java.util.UUID, jdbcType=OTHER}
+    </delete>
+
+    <!-- Count by conversation ID -->
+    <select id="countByConversationId" parameterType="java.util.UUID" resultType="long">
+        SELECT COUNT(*)
+        FROM messages
+        WHERE conversation_id = #{conversationId, javaType=java.util.UUID, jdbcType=OTHER}
+    </select>
+
+</mapper>

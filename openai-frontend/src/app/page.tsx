@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Sidebar, ChatArea } from "@/components";
-import { useConversations, useMessages } from "@/hooks";
+import { ChatArea, Sidebar } from "@/components";
+import { useConversations, useMessages, useClientUser } from "@/hooks";
 import styles from "./page.module.css";
 
 export default function Home() {
@@ -10,9 +10,17 @@ export default function Home() {
     string | null
   >(null);
   const {
+    clientUser,
+    loading: clientUserLoading,
+    error: clientUserError,
+  } = useClientUser();
+
+  const {
     conversations,
     loading: conversationsLoading,
     createConversation,
+    updateConversation,
+    updateConversationStatus,
     deleteConversation,
   } = useConversations();
   const {
@@ -27,6 +35,25 @@ export default function Home() {
       setActiveConversationId(newConv.id);
     } catch (err) {
       console.error("Failed to create conversation:", err);
+    }
+  };
+
+  const handleUpdateConversation = async (id: string, data: Partial<any>) => {
+    try {
+      await updateConversation(id, data);
+    } catch (err) {
+      console.error("Failed to update conversation:", err);
+    }
+  };
+
+  const handleUpdateConversationStatus = async (
+    id: string,
+    status: "active" | "closed" | "archived" | "error"
+  ) => {
+    try {
+      await updateConversationStatus(id, status);
+    } catch (err) {
+      console.error("Failed to update conversation status:", err);
     }
   };
 
@@ -53,6 +80,46 @@ export default function Home() {
     }
   };
 
+  // Show loading state while initializing client user
+  if (clientUserLoading) {
+    return (
+      <div className={styles.container}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            height: "100vh",
+            fontSize: "18px",
+            color: "#666",
+          }}
+        >
+          <div>初始化中...</div>
+        </div>
+      </div>
+    );
+  }
+
+  // Show error state if client user initialization failed
+  if (clientUserError) {
+    return (
+      <div className={styles.container}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            height: "100vh",
+            fontSize: "18px",
+            color: "#d32f2f",
+          }}
+        >
+          <div>初始化失败: {clientUserError}</div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={styles.container}>
       <Sidebar
@@ -61,7 +128,10 @@ export default function Home() {
         onSelectConversation={setActiveConversationId}
         onCreateConversation={handleCreateConversation}
         onDeleteConversation={handleDeleteConversation}
+        onUpdateConversation={handleUpdateConversation}
+        onUpdateConversationStatus={handleUpdateConversationStatus}
         loading={conversationsLoading}
+        clientUser={clientUser}
       />
       <ChatArea
         messages={messages}

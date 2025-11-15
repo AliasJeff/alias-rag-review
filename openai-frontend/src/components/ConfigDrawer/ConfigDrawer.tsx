@@ -1,35 +1,75 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { X, Save } from "lucide-react";
+import { X, Save, Eye, EyeOff } from "lucide-react";
 import { Config } from "@/types";
-import { apiService } from "@/services/api";
 import styles from "./ConfigDrawer.module.css";
+import { clientUserApi } from "@/services/api";
+import { getOrCreateClientIdentifier } from "@/utils/clientIdentifier";
 
 interface ConfigDrawerProps {
   isOpen: boolean;
   onClose: () => void;
+  clientUser?: any;
 }
 
-export const ConfigDrawer = ({ isOpen, onClose }: ConfigDrawerProps) => {
-  const [config, setConfig] = useState<Config>({ model: "gpt-4o" });
+interface ExtendedConfig extends Config {
+  githubToken?: string;
+  openaiApiKey?: string;
+}
+
+export const ConfigDrawer = ({
+  isOpen,
+  onClose,
+  clientUser,
+}: ConfigDrawerProps) => {
+  const [config, setConfig] = useState<ExtendedConfig>({ model: "gpt-4o" });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showGithubToken, setShowGithubToken] = useState(false);
+  const [showOpenaiApiKey, setShowOpenaiApiKey] = useState(false);
+  const [clientIdentifier, setClientIdentifier] = useState<string>("");
 
   useEffect(() => {
     if (isOpen) {
-      loadConfig();
+      const identifier = getOrCreateClientIdentifier();
+      setClientIdentifier(identifier);
+      if (clientUser) {
+        // Use passed clientUser data directly
+        setConfig({
+          model: clientUser?.model || "gpt-4o",
+          temperature: clientUser?.temperature || 0.7,
+          maxTokens: clientUser?.maxTokens || 10000,
+          githubToken: clientUser?.githubToken || "",
+          openaiApiKey: clientUser?.openaiApiKey || "",
+        });
+      } else {
+        // Fallback to fetching if no clientUser passed
+        loadConfig(identifier);
+      }
     }
-  }, [isOpen]);
+  }, [isOpen, clientUser]);
 
-  const loadConfig = async () => {
+  const loadConfig = async (identifier: string) => {
     setLoading(true);
     setError(null);
     try {
-      const data = await apiService.getConfig();
-      setConfig(data);
+      // Load client user data (which includes tokens and config)
+      const clientUser = await clientUserApi.getClientUserByIdentifier(
+        identifier
+      );
+
+      setConfig({
+        model: clientUser?.model || "gpt-4o",
+        temperature: clientUser?.temperature || 0.7,
+        maxTokens: clientUser?.maxTokens || 10000,
+        githubToken: clientUser?.githubToken || "",
+        openaiApiKey: clientUser?.openaiApiKey || "",
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load config");
+      // Set default config even if loading fails
+      setConfig({ model: "gpt-4o" });
     } finally {
       setLoading(false);
     }
@@ -39,7 +79,29 @@ export const ConfigDrawer = ({ isOpen, onClose }: ConfigDrawerProps) => {
     setLoading(true);
     setError(null);
     try {
-      await apiService.saveConfig(config);
+      // Update GitHub token if provided
+      if (config.githubToken) {
+        await clientUserApi.updateGithubToken(
+          clientIdentifier,
+          config.githubToken
+        );
+      }
+
+      // Update OpenAI API key if provided
+      if (config.openaiApiKey) {
+        await clientUserApi.updateOpenaiApiKey(
+          clientIdentifier,
+          config.openaiApiKey
+        );
+      }
+
+      // Update model settings
+      await clientUserApi.updateClientUser(clientIdentifier, {
+        model: config.model,
+        temperature: config.temperature,
+        maxTokens: config.maxTokens,
+      });
+
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save config");
@@ -71,15 +133,49 @@ export const ConfigDrawer = ({ isOpen, onClose }: ConfigDrawerProps) => {
           {error && <div className={styles.error}>{error}</div>}
 
           <div className={styles.formGroup}>
-            <label className={styles.label}>API Key</label>
-            <input
-              type="password"
-              className={styles.input}
-              value={config.apiKey || ""}
-              onChange={(e) => handleChange("apiKey", e.target.value)}
-              placeholder="输入 API Key"
-              disabled={loading}
-            />
+            <label className={styles.label}>GitHub Token</label>
+            <div className={styles.passwordInputWrapper}>
+              <input
+                type={showGithubToken ? "text" : "password"}
+                className={styles.input}
+                value={config.githubToken || ""}
+                onChange={(e) => handleChange("githubToken", e.target.value)}
+                placeholder="输入 GitHub Token"
+                disabled={loading}
+              />
+              <button
+                type="button"
+                className={styles.toggleButton}
+                onClick={() => setShowGithubToken(!showGithubToken)}
+                disabled={loading}
+                title={showGithubToken ? "隐藏" : "显示"}
+              >
+                {showGithubToken ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            </div>
+          </div>
+
+          <div className={styles.formGroup}>
+            <label className={styles.label}>OpenAI API Key</label>
+            <div className={styles.passwordInputWrapper}>
+              <input
+                type={showOpenaiApiKey ? "text" : "password"}
+                className={styles.input}
+                value={config.openaiApiKey || ""}
+                onChange={(e) => handleChange("openaiApiKey", e.target.value)}
+                placeholder="输入 OpenAI API Key"
+                disabled={loading}
+              />
+              <button
+                type="button"
+                className={styles.toggleButton}
+                onClick={() => setShowOpenaiApiKey(!showOpenaiApiKey)}
+                disabled={loading}
+                title={showOpenaiApiKey ? "隐藏" : "显示"}
+              >
+                {showOpenaiApiKey ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            </div>
           </div>
 
           <div className={styles.formGroup}>
@@ -88,7 +184,7 @@ export const ConfigDrawer = ({ isOpen, onClose }: ConfigDrawerProps) => {
               className={styles.input}
               value={config.model || ""}
               onChange={(e) => handleChange("model", e.target.value)}
-              disabled={loading}
+              disabled={true}
             >
               <option value="">选择模型</option>
               <option value="gpt-4o">GPT-4o</option>
@@ -110,7 +206,7 @@ export const ConfigDrawer = ({ isOpen, onClose }: ConfigDrawerProps) => {
               min="0"
               max="2"
               step="0.1"
-              disabled={loading}
+              disabled={true}
             />
           </div>
 
@@ -124,7 +220,7 @@ export const ConfigDrawer = ({ isOpen, onClose }: ConfigDrawerProps) => {
                 handleChange("maxTokens", parseInt(e.target.value))
               }
               min="1"
-              disabled={loading}
+              disabled={true}
             />
           </div>
         </div>

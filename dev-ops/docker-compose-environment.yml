@@ -1,0 +1,89 @@
+# docker-comopse -f docker-compose-environment.yml up -d
+name: ai-rag-knowledge
+
+services:
+  # 对话模型
+  # ollama pull deepseek-r1:1.5b
+  # 运行模型
+  # ollama run deepseek-r1:1.5b
+  # 联网模型
+  # ollama pull qwen3-embedding:0.6b
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ./models:/root/.ollama/models
+    entrypoint: [ "sh", "-c" ]
+    command: >
+      "ollama serve"
+    networks:
+      - alias-rag-review
+
+  redis:
+    image: redis:6.2
+    restart: always
+    hostname: redis
+    privileged: true
+    ports:
+      - 16379:6379
+    volumes:
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf
+    command: redis-server /usr/local/etc/redis/redis.conf
+    networks:
+      - alias-rag-review
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+  # RedisAdmin https://github.com/joeferner/redis-commander
+  # 账密 admin/admin
+  redis-admin:
+    image: spryker/redis-commander:0.8.0
+    hostname: redis-commander
+    restart: always
+    ports:
+      - 8081:8081
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+      - HTTP_USER=admin
+      - HTTP_PASSWORD=admin
+      - LANG=C.UTF-8
+      - LANGUAGE=C.UTF-8
+      - LC_ALL=C.UTF-8
+    networks:
+      - alias-rag-review
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  vector_db:
+    image: ankane/pgvector
+    restart: always
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=ai-rag-knowledge
+      - PGPASSWORD=postgres
+    volumes:
+      - ./postgres/data:/var/lib/postgresql/data
+      - ./postgres/sql/init.sql:/docker-entrypoint-initdb.d/init.sql
+    logging:
+      options:
+        max-size: 10m
+        max-file: "3"
+    ports:
+      - "15432:5432"
+    healthcheck:
+      test: "pg_isready -U postgres -d ai-rag-knowledge"
+      interval: 2s
+      timeout: 20s
+      retries: 10
+    networks:
+      - alias-rag-review
+
+networks:
+  alias-rag-review:
+    driver: bridge

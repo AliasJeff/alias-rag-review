@@ -1,7 +1,24 @@
 // 会话类型
 export interface Conversation {
   id: string;
-  title: string;
+  clientIdentifier: string;
+  title?: string;
+  description?: string;
+  status: "active" | "closed" | "archived" | "error";
+  prUrl?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// 客户端用户类型
+export interface ClientUser {
+  id: string;
+  clientIdentifier: string;
+  githubToken?: string;
+  openaiApiKey?: string;
+  model?: string;
+  temperature?: number;
+  maxTokens?: number;
   createdAt: string;
   updatedAt: string;
 }

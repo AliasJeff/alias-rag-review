@@ -135,7 +135,7 @@ public class AiConversationController {
      */
     @Operation(summary = "获取对话上下文", description = "获取指定对话的完整上下文和历史记录")
     @GetMapping("/context/{conversationId}")
-    public Response<ChatContext> getContext(@PathVariable String conversationId) {
+    public Response<ChatContext> getContext(@PathVariable("conversationId") String conversationId) {
         try {
             ChatContext context = conversationService.getConversationHistory(conversationId);
 
@@ -161,7 +161,7 @@ public class AiConversationController {
      */
     @Operation(summary = "清空对话历史", description = "清空指定对话的所有消息历史")
     @DeleteMapping("/context/{conversationId}/clear")
-    public Response<String> clearContext(@PathVariable String conversationId) {
+    public Response<String> clearContext(@PathVariable("conversationId") String conversationId) {
         try {
             conversationService.clearConversation(conversationId);
 
@@ -183,7 +183,7 @@ public class AiConversationController {
      */
     @Operation(summary = "删除对话", description = "删除指定的对话及其所有历史记录")
     @DeleteMapping("/context/{conversationId}")
-    public Response<String> deleteContext(@PathVariable String conversationId) {
+    public Response<String> deleteContext(@PathVariable("conversationId") String conversationId) {
         try {
             conversationService.deleteConversation(conversationId);
 

@@ -13,7 +13,13 @@ interface SidebarProps {
   onSelectConversation: (id: string) => void;
   onCreateConversation: () => void;
   onDeleteConversation: (id: string) => void;
+  onUpdateConversation?: (id: string, data: Partial<Conversation>) => void;
+  onUpdateConversationStatus?: (
+    id: string,
+    status: "active" | "closed" | "archived" | "error"
+  ) => void;
   loading?: boolean;
+  clientUser?: any;
 }
 
 export const Sidebar = ({
@@ -22,9 +28,13 @@ export const Sidebar = ({
   onSelectConversation,
   onCreateConversation,
   onDeleteConversation,
+  onUpdateConversation,
+  onUpdateConversationStatus,
   loading = false,
+  clientUser,
 }: SidebarProps) => {
   const [showConfigDrawer, setShowConfigDrawer] = useState(false);
+  const [showConversationDetail, setShowConversationDetail] = useState(false);
 
   return (
     <div className={styles.sidebar}>
@@ -34,7 +44,10 @@ export const Sidebar = ({
         onSelect={onSelectConversation}
         onCreate={onCreateConversation}
         onDelete={onDeleteConversation}
+        onUpdate={onUpdateConversation}
+        onStatusChange={onUpdateConversationStatus}
         loading={loading}
+        onShowDetail={() => setShowConversationDetail(true)}
       />
 
       <div className={styles.footer}>
@@ -51,6 +64,7 @@ export const Sidebar = ({
       <ConfigDrawer
         isOpen={showConfigDrawer}
         onClose={() => setShowConfigDrawer(false)}
+        clientUser={clientUser}
       />
     </div>
   );

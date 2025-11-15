@@ -1,10 +1,10 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { ChatRequest, ChatResponse, Message } from "@/types";
 import { chatApi } from "@/services/modules/chat";
 
 export interface UseChatOptions {
   conversationId?: string;
-  userId: string;
+  userId: string | undefined;
   systemPrompt?: string;
 }
 
@@ -19,6 +19,13 @@ export const useChat = (options: UseChatOptions) => {
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
+
+  /**
+   * 同步 conversationId 的变化
+   */
+  useEffect(() => {
+    setConversationId(initialConvId);
+  }, [initialConvId]);
 
   /**
    * 获取对话上下文

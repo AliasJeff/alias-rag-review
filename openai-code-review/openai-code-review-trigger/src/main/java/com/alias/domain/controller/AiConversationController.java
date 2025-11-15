@@ -4,11 +4,11 @@ import com.alias.domain.model.ChatContext;
 import com.alias.domain.model.ChatRequest;
 import com.alias.domain.model.Response;
 import com.alias.domain.service.IAiConversationService;
-import org.springframework.ai.chat.model.ChatResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -25,8 +25,8 @@ import java.util.UUID;
 @RequestMapping("/api/v1/ai-chat")
 public class AiConversationController {
 
-    @Autowired
-    private IAiConversationService conversationService;
+    @Resource
+    private IAiConversationService aiConversationService;
 
     /**
      * Send a chat message and get response
@@ -55,7 +55,7 @@ public class AiConversationController {
             log.info("Chat request received. conversationId={}, userId={}, messageLength={}", request.getConversationId(), request.getUserId(), request.getMessage().length());
 
             // Process chat
-            ChatResponse response = conversationService.chat(request);
+            ChatResponse response = aiConversationService.chat(request);
 
             log.info("Chat completed successfully. conversationId={}", request.getConversationId());
 
@@ -102,7 +102,7 @@ public class AiConversationController {
             // Process stream chat in a separate thread
             new Thread(() -> {
                 try {
-                    conversationService.chatStream(request, emitter);
+                    aiConversationService.chatStream(request, emitter);
                 } catch (Exception e) {
                     log.error("Stream chat failed. error={}", e.getMessage(), e);
                     try {
@@ -136,7 +136,7 @@ public class AiConversationController {
     @GetMapping("/context/{conversationId}")
     public Response<ChatContext> getContext(@PathVariable("conversationId") String conversationId) {
         try {
-            ChatContext context = conversationService.getConversationHistory(conversationId);
+            ChatContext context = aiConversationService.getConversationHistory(conversationId);
 
             if (context == null) {
                 return Response.<ChatContext>builder().code("4004").info("Conversation not found").build();
@@ -162,7 +162,7 @@ public class AiConversationController {
     @DeleteMapping("/context/{conversationId}/clear")
     public Response<String> clearContext(@PathVariable("conversationId") String conversationId) {
         try {
-            conversationService.clearConversation(conversationId);
+            aiConversationService.clearConversation(conversationId);
 
             log.info("Conversation cleared. conversationId={}", conversationId);
 
@@ -184,7 +184,7 @@ public class AiConversationController {
     @DeleteMapping("/context/{conversationId}")
     public Response<String> deleteContext(@PathVariable("conversationId") String conversationId) {
         try {
-            conversationService.deleteConversation(conversationId);
+            aiConversationService.deleteConversation(conversationId);
 
             log.info("Conversation deleted. conversationId={}", conversationId);
 

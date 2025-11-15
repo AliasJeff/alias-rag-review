@@ -7,7 +7,7 @@ import styles from "./ConversationList.module.css";
 
 interface ConversationListProps {
   conversations: Conversation[];
-  activeId: string | null;
+  activeId: string | null | undefined;
   onSelect: (id: string) => void;
   onCreate: () => void;
   onDelete: (id: string) => void;

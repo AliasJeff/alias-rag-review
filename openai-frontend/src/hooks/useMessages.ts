@@ -1,15 +1,18 @@
 import { useState, useEffect, useCallback } from "react";
 import { Message } from "@/types";
 import { chatApi } from "@/services/modules/chat";
+import { messageApi } from "@/services/modules/message";
+import { useClientUser } from "./useClientUser";
 
 /**
  * Hook for managing messages within a conversation
  * Uses chat API to fetch conversation context and messages
  */
-export const useMessages = (conversationId: string | null) => {
+export const useMessages = (conversationId: string | null | undefined) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { clientUser } = useClientUser();
 
   /**
    * Fetch messages from conversation context via chat API
@@ -20,8 +23,8 @@ export const useMessages = (conversationId: string | null) => {
     setLoading(true);
     setError(null);
     try {
-      const context = await chatApi.getContext(conversationId);
-      setMessages(context.messages || []);
+      const res = await messageApi.getMessages(conversationId);
+      setMessages(res || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to fetch messages");
     } finally {

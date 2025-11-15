@@ -42,5 +42,3 @@ build/
 /rag-dev-tech-app/cloned-repo/
 /rag-dev-tech-app/**/application-local.yml
 /push_all_branches.sh
-
-/docs/dev-ops/models/

@@ -5,6 +5,7 @@ Unified multi-module Maven repository containing:
 - openai-code-review: Code review SDK and demo (modules: openai-code-review-sdk, openai-code-review-test)
 
 ### Build
+- Pre-commit hook: `./.githooks/pre-commit` (need to execute `git config core.hooksPath .githooks` first)
 - Build all modules at repo root:
   - `mvn -T 1C -DskipTests install`
 - Build specific submodule:

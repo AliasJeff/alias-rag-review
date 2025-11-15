@@ -6,39 +6,39 @@ import { ApiResponse, Conversation } from "@/types";
  */
 export const conversationApi = {
   /**
-   * 获取所有会话
-   */
-  async getConversations(): Promise<Conversation[]> {
-    const response = await httpClient.get<ApiResponse<Conversation[]>>(
-      "/api/v1/conversations"
-    );
-    return response.data.data;
-  },
-
-  /**
    * 创建新会话
    */
-  async createConversation(title: string): Promise<Conversation> {
+  async createConversation(conversation: {
+    clientIdentifier: string;
+    title?: string;
+    description?: string;
+    prUrl?: string;
+  }): Promise<Conversation> {
     const response = await httpClient.post<ApiResponse<Conversation>>(
       "/api/v1/conversations",
-      { title }
+      conversation
     );
     return response.data.data;
-  },
-
-  /**
-   * 删除会话
-   */
-  async deleteConversation(id: string): Promise<void> {
-    await httpClient.delete(`/api/v1/conversations/${id}`);
   },
 
   /**
    * 获取会话详情
    */
-  async getConversationDetail(id: string): Promise<Conversation> {
+  async getConversation(conversationId: string): Promise<Conversation> {
     const response = await httpClient.get<ApiResponse<Conversation>>(
-      `/api/v1/conversations/${id}`
+      `/api/v1/conversations/${conversationId}`
+    );
+    return response.data.data;
+  },
+
+  /**
+   * 获取客户端的所有会话
+   */
+  async getClientConversations(
+    clientIdentifier: string
+  ): Promise<Conversation[]> {
+    const response = await httpClient.get<ApiResponse<Conversation[]>>(
+      `/api/v1/conversations/client/${clientIdentifier}`
     );
     return response.data.data;
   },
@@ -47,12 +47,48 @@ export const conversationApi = {
    * 更新会话
    */
   async updateConversation(
-    id: string,
+    conversationId: string,
     data: Partial<Conversation>
   ): Promise<Conversation> {
     const response = await httpClient.put<ApiResponse<Conversation>>(
-      `/api/v1/conversations/${id}`,
+      `/api/v1/conversations/${conversationId}`,
       data
+    );
+    return response.data.data;
+  },
+
+  /**
+   * 更新会话状态
+   */
+  async updateConversationStatus(
+    conversationId: string,
+    status: "active" | "closed" | "archived" | "error"
+  ): Promise<string> {
+    const response = await httpClient.patch<ApiResponse<string>>(
+      `/api/v1/conversations/${conversationId}/status`,
+      null,
+      { params: { status } }
+    );
+    return response.data.data;
+  },
+
+  /**
+   * 删除会话
+   */
+  async deleteConversation(conversationId: string): Promise<string> {
+    const response = await httpClient.delete<ApiResponse<string>>(
+      `/api/v1/conversations/${conversationId}`
+    );
+    return response.data.data;
+  },
+
+  /**
+   * 根据PR URL获取会话
+   */
+  async getConversationsByPrUrl(prUrl: string): Promise<Conversation[]> {
+    const response = await httpClient.get<ApiResponse<Conversation[]>>(
+      "/api/v1/conversations/search/pr-url",
+      { params: { prUrl } }
     );
     return response.data.data;
   },

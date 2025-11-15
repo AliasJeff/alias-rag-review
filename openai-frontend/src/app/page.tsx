@@ -19,6 +19,8 @@ export default function Home() {
     conversations,
     loading: conversationsLoading,
     createConversation,
+    updateConversation,
+    updateConversationStatus,
     deleteConversation,
   } = useConversations();
   const {
@@ -33,6 +35,25 @@ export default function Home() {
       setActiveConversationId(newConv.id);
     } catch (err) {
       console.error("Failed to create conversation:", err);
+    }
+  };
+
+  const handleUpdateConversation = async (id: string, data: Partial<any>) => {
+    try {
+      await updateConversation(id, data);
+    } catch (err) {
+      console.error("Failed to update conversation:", err);
+    }
+  };
+
+  const handleUpdateConversationStatus = async (
+    id: string,
+    status: "active" | "closed" | "archived" | "error"
+  ) => {
+    try {
+      await updateConversationStatus(id, status);
+    } catch (err) {
+      console.error("Failed to update conversation status:", err);
     }
   };
 
@@ -107,6 +128,8 @@ export default function Home() {
         onSelectConversation={setActiveConversationId}
         onCreateConversation={handleCreateConversation}
         onDeleteConversation={handleDeleteConversation}
+        onUpdateConversation={handleUpdateConversation}
+        onUpdateConversationStatus={handleUpdateConversationStatus}
         loading={conversationsLoading}
         clientUser={clientUser}
       />

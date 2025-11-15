@@ -67,7 +67,14 @@ export interface ChatRequest {
 export interface ChatResponse {
   content: string;
   conversationId: string;
+  messageId?: string;
   messageCount?: number;
+  tokensUsed?: number;
+  totalTokens?: number;
+  model?: string;
+  timestamp?: string;
+  status?: string;
+  errorMessage?: string;
 }
 
 // Chat 上下文类型

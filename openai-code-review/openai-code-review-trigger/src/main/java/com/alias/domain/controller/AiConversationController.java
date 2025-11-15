@@ -2,13 +2,13 @@ package com.alias.domain.controller;
 
 import com.alias.domain.model.ChatContext;
 import com.alias.domain.model.ChatRequest;
+import com.alias.domain.model.ChatResponse;
 import com.alias.domain.model.Response;
 import com.alias.domain.service.IAiConversationService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 

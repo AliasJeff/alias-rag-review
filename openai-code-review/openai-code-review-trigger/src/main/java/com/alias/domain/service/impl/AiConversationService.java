@@ -8,7 +8,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.UserMessage;
-import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.stereotype.Service;
@@ -70,13 +69,14 @@ public class AiConversationService implements IAiConversationService {
         );
 
         // Call Spring AI ChatClient
-        ChatResponse response = chatClient.prompt(prompt).call().chatResponse();
+        org.springframework.ai.chat.model.ChatResponse springResponse = chatClient.prompt(prompt).call().chatResponse();
 
         // Extract response content
-        String assistantContent = response.getResult().getOutput().getText();
+        String assistantContent = springResponse.getResult().getOutput().getText();
+        String messageId = UUID.randomUUID().toString();
 
         // Add assistant message to context
-        ChatMessage assistantMessage = ChatMessage.builder().id(UUID.randomUUID().toString()).role("assistant").content(assistantContent).createdAt(LocalDateTime.now()).build();
+        ChatMessage assistantMessage = ChatMessage.builder().id(messageId).role("assistant").content(assistantContent).createdAt(LocalDateTime.now()).build();
         context.addMessage(assistantMessage);
 
         // Save context
@@ -111,7 +111,8 @@ public class AiConversationService implements IAiConversationService {
 
         logger.info("Chat completed. conversationId={}, responseLength={}", context.getConversationId(), assistantContent.length());
 
-        return response;
+        // Build and return custom ChatResponse
+        return ChatResponse.builder().content(assistantContent).conversationId(context.getConversationId()).messageId(messageId).messageCount(context.getMessageCount()).model(context.getModel()).timestamp(LocalDateTime.now()).status("success").build();
     }
 
     @Override
@@ -288,8 +289,7 @@ public class AiConversationService implements IAiConversationService {
             );
 
             // Call chat client and stream response
-            ChatResponse response = chatClient.prompt(prompt).call().chatResponse();
-            String content = response.getResult().getOutput().getText();
+            String content = chatClient.prompt(prompt).call().chatResponse().getResult().getOutput().getText();
 
             // Send content in chunks (simulate streaming)
             String[] words = content.split("\\s+");

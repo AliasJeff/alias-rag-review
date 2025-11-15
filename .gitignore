@@ -36,4 +36,4 @@ dist/
 !openai-frontend/.vscode/extensions.json
 
 # Local application profile (contains secrets)
-openai-code-review/openai-code-review-sdk/src/main/resources/application-local.yml
+**/application-local.yml

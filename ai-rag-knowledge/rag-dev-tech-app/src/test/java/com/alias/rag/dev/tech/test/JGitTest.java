@@ -1,6 +1,11 @@
 package com.alias.rag.dev.tech.test;
 
 import jakarta.annotation.Resource;
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.*;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.util.List;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.io.FileUtils;
 import org.eclipse.jgit.api.Git;
@@ -15,64 +20,61 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.core.io.PathResource;
 import org.springframework.test.context.junit4.SpringRunner;
 
-import java.io.File;
-import java.io.IOException;
-import java.nio.file.*;
-import java.nio.file.attribute.BasicFileAttributes;
-import java.util.List;
-
 @Slf4j
 @RunWith(SpringRunner.class)
 @SpringBootTest
 public class JGitTest {
 
-    @Resource
-    private TokenTextSplitter tokenTextSplitter;
-    @Resource
-    private PgVectorStore pgVectorStore;
+  @Resource private TokenTextSplitter tokenTextSplitter;
+  @Resource private PgVectorStore pgVectorStore;
 
-    @Test
-    public void test() throws Exception {
-        String repoURL = "https://gitcode.com/CreativeAlliance/group-buy-market-liergou";
-        String username = "Yao__Shun__Yu";
-        String password = "DqUc-jjKcNpgKaw8nmReNazm";
+  @Test
+  public void test() throws Exception {
+    String repoURL = "https://gitcode.com/CreativeAlliance/group-buy-market-liergou";
+    String username = "Yao__Shun__Yu";
+    String password = "DqUc-jjKcNpgKaw8nmReNazm";
 
-        String localPath = "./cloned-repo";
-        log.info("克隆路径：" + new File(localPath).getAbsolutePath());
+    String localPath = "./cloned-repo";
+    log.info("克隆路径：" + new File(localPath).getAbsolutePath());
 
-        FileUtils.deleteDirectory(new File(localPath));
+    FileUtils.deleteDirectory(new File(localPath));
 
-        Git git = Git.cloneRepository()
-                .setURI(repoURL)
-                .setDirectory(new File(localPath))
-                .setCredentialsProvider(new UsernamePasswordCredentialsProvider(username, password))
-                .call();
+    Git git =
+        Git.cloneRepository()
+            .setURI(repoURL)
+            .setDirectory(new File(localPath))
+            .setCredentialsProvider(new UsernamePasswordCredentialsProvider(username, password))
+            .call();
 
-        git.close();
-    }
+    git.close();
+  }
 
-    @Test
-    public void test_file() throws IOException {
-        Files.walkFileTree(Paths.get("./cloned-repo"), new SimpleFileVisitor<>() {
-            @Override
-            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+  @Test
+  public void test_file() throws IOException {
+    Files.walkFileTree(
+        Paths.get("./cloned-repo"),
+        new SimpleFileVisitor<>() {
+          @Override
+          public FileVisitResult visitFile(Path file, BasicFileAttributes attrs)
+              throws IOException {
 
-                log.info("文件路径:{}", file.toString());
+            log.info("文件路径:{}", file.toString());
 
-                PathResource resource = new PathResource(file);
-                TikaDocumentReader reader = new TikaDocumentReader(resource);
+            PathResource resource = new PathResource(file);
+            TikaDocumentReader reader = new TikaDocumentReader(resource);
 
-                List<Document> documents = reader.get();
-                List<Document> documentSplitterList = tokenTextSplitter.apply(documents);
+            List<Document> documents = reader.get();
+            List<Document> documentSplitterList = tokenTextSplitter.apply(documents);
 
-                documents.forEach(doc -> doc.getMetadata().put("knowledge", "group-buy-market-liergou"));
-                documentSplitterList.forEach(doc -> doc.getMetadata().put("knowledge", "group-buy-market-liergou"));
+            documents.forEach(
+                doc -> doc.getMetadata().put("knowledge", "group-buy-market-liergou"));
+            documentSplitterList.forEach(
+                doc -> doc.getMetadata().put("knowledge", "group-buy-market-liergou"));
 
-                pgVectorStore.accept(documentSplitterList);
+            pgVectorStore.accept(documentSplitterList);
 
-                return FileVisitResult.CONTINUE;
-            }
+            return FileVisitResult.CONTINUE;
+          }
         });
-    }
-
+  }
 }

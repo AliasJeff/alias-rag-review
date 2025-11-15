@@ -40,3 +40,5 @@ build/
 
 ### environment variables ###
 .env
+
+/openai-code-review-app/**/application-local.yml

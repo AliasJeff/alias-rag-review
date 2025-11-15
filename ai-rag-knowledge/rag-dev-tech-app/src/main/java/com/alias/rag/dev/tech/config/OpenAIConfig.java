@@ -11,24 +11,21 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 public class OpenAIConfig {
 
-    @Bean
-    public TokenTextSplitter tokenTextSplitter() {
-        return new TokenTextSplitter();
-    }
+  @Bean
+  public TokenTextSplitter tokenTextSplitter() {
+    return new TokenTextSplitter();
+  }
 
-    @Bean
-    public OpenAiApi openAiApi(@Value("${spring.ai.openai.base-url}") String baseUrl, @Value("${spring.ai.openai.api-key}") String apikey) {
-        return OpenAiApi.builder()
-                .baseUrl(baseUrl)
-                .apiKey(apikey)
-                .build();
-    }
+  @Bean
+  public OpenAiApi openAiApi(
+      @Value("${spring.ai.openai.base-url}") String baseUrl,
+      @Value("${spring.ai.openai.api-key}") String apikey) {
+    return OpenAiApi.builder().baseUrl(baseUrl).apiKey(apikey).build();
+  }
 
-    @Bean("openAiSimpleVectorStore")
-    public SimpleVectorStore vectorStore(OpenAiApi openAiApi) {
-        OpenAiEmbeddingModel embeddingModel = new OpenAiEmbeddingModel(openAiApi);
-        return SimpleVectorStore.builder(embeddingModel).build();
-    }
-
+  @Bean("openAiSimpleVectorStore")
+  public SimpleVectorStore vectorStore(OpenAiApi openAiApi) {
+    OpenAiEmbeddingModel embeddingModel = new OpenAiEmbeddingModel(openAiApi);
+    return SimpleVectorStore.builder(embeddingModel).build();
+  }
 }
-

@@ -14,10 +14,17 @@ echo "🔍 Running pre-commit linting and formatting..."
 
 # 1. Run spotless on Java projects
 echo "📦 Running spotless formatting for Java projects..."
-if ! mvn spotless:apply -q; then
-    echo "❌ Spotless formatting failed"
-    exit 1
-fi
+# 定义 Java 子模块列表
+JAVA_MODULES=("ai-rag-knowledge" "openai-code-review")
+
+for module in "${JAVA_MODULES[@]}"; do
+    if [ -f "$module/pom.xml" ]; then
+        echo "📦 Running spotless formatting in $module..."
+        (cd "$module" && mvn spotless:apply -q)
+    else
+        echo "⚠️  No pom.xml found in $module, skipping"
+    fi
+done
 echo "✅ Java formatting completed"
 
 # 2. Run ESLint on openai-frontend

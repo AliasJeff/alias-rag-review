@@ -12,7 +12,7 @@ interface ConfigDrawerProps {
 }
 
 export const ConfigDrawer = ({ isOpen, onClose }: ConfigDrawerProps) => {
-  const [config, setConfig] = useState<Config>({});
+  const [config, setConfig] = useState<Config>({ model: "gpt-4o" });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -71,18 +71,6 @@ export const ConfigDrawer = ({ isOpen, onClose }: ConfigDrawerProps) => {
           {error && <div className={styles.error}>{error}</div>}
 
           <div className={styles.formGroup}>
-            <label className={styles.label}>API URL</label>
-            <input
-              type="text"
-              className={styles.input}
-              value={config.apiUrl || ""}
-              onChange={(e) => handleChange("apiUrl", e.target.value)}
-              placeholder="http://localhost:3001/api"
-              disabled={loading}
-            />
-          </div>
-
-          <div className={styles.formGroup}>
             <label className={styles.label}>API Key</label>
             <input
               type="password"
@@ -96,14 +84,18 @@ export const ConfigDrawer = ({ isOpen, onClose }: ConfigDrawerProps) => {
 
           <div className={styles.formGroup}>
             <label className={styles.label}>模型</label>
-            <input
-              type="text"
+            <select
               className={styles.input}
               value={config.model || ""}
               onChange={(e) => handleChange("model", e.target.value)}
-              placeholder="gpt-3.5-turbo"
               disabled={loading}
-            />
+            >
+              <option value="">选择模型</option>
+              <option value="gpt-4o">GPT-4o</option>
+              <option value="gpt-4-turbo">GPT-4 Turbo</option>
+              <option value="gpt-4">GPT-4</option>
+              <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+            </select>
           </div>
 
           <div className={styles.formGroup}>
@@ -127,7 +119,7 @@ export const ConfigDrawer = ({ isOpen, onClose }: ConfigDrawerProps) => {
             <input
               type="number"
               className={styles.input}
-              value={config.maxTokens || 2000}
+              value={config.maxTokens || 10000}
               onChange={(e) =>
                 handleChange("maxTokens", parseInt(e.target.value))
               }

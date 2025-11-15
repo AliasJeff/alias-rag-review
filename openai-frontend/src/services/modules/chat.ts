@@ -69,15 +69,12 @@ export const chatApi = {
         buffer = events.pop() || "";
 
         for (const event of events) {
-          const lines = event
-            .split(/\r?\n/)
-            .map((l) => l.trim())
-            .filter(Boolean);
+          const lines = event.split(/\r?\n/);
 
           for (const line of lines) {
             // 只处理 data 行
             if (line.startsWith("data:")) {
-              const jsonStr = line.substring(5).trim();
+              const jsonStr = line.substring(5);
               if (jsonStr === "Streaming completed") {
                 onComplete?.();
                 break;

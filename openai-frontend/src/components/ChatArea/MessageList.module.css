@@ -106,29 +106,73 @@
   height: 20px;
 }
 
-.loading span {
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background-color: #999;
-  animation: bounce 1.4s infinite;
+.spinner {
+  animation: spin 1s linear infinite;
+  color: #666;
 }
 
-.loading span:nth-child(2) {
-  animation-delay: 0.2s;
-}
-
-.loading span:nth-child(3) {
-  animation-delay: 0.4s;
-}
-
-@keyframes bounce {
-  0%,
-  80%,
-  100% {
-    opacity: 0.3;
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
   }
-  40% {
-    opacity: 1;
+  to {
+    transform: rotate(360deg);
   }
+}
+
+/* Markdown styles */
+.paragraph {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.inlineCode {
+  background-color: rgba(0, 0, 0, 0.1);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: "Courier New", monospace;
+  font-size: 0.9em;
+}
+
+.user .inlineCode {
+  background-color: rgba(255, 255, 255, 0.2);
+}
+
+.preBlock {
+  background-color: #f5f5f5;
+  padding: 12px;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 8px 0;
+  font-size: 0.9em;
+}
+
+.user .preBlock {
+  background-color: rgba(0, 0, 0, 0.1);
+}
+
+.codeBlock {
+  font-family: "Courier New", monospace;
+  font-size: 0.9em;
+}
+
+.list,
+.orderedList {
+  margin: 8px 0;
+  padding-left: 20px;
+}
+
+.listItem {
+  margin: 4px 0;
+}
+
+.blockquote {
+  border-left: 3px solid rgba(0, 0, 0, 0.2);
+  padding-left: 12px;
+  margin: 8px 0;
+  opacity: 0.8;
+}
+
+.user .blockquote {
+  border-left-color: rgba(255, 255, 255, 0.3);
 }

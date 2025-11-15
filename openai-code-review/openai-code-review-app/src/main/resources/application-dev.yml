@@ -1,0 +1,37 @@
+server:
+  port: 8080
+
+spring:
+  ai:
+    openai:
+      api-key: "${OPENAI_API_KEY:}"
+      base-url: "https://api.openai.com/v1"
+
+logging:
+  level:
+    root: info
+  config: classpath:logback-spring.xml
+chatglm:
+  apiHost: https://open.bigmodel.cn/api/paas/v4/chat/completions
+  apiKeySecret: ""
+openai:
+  apiHost: https://api.openai.com/v1/chat/completions
+  apiKey: ""
+github:
+  token: ""
+rag:
+  apiBaseUrl: http://localhost:8080/api/v1/rag/repo
+commit:
+  project: "repo"
+  branch: "main"
+  author: "local"
+  message: "code review"
+
+springdoc:
+  api-docs:
+    enabled: true
+    path: /v3/api-docs
+  swagger-ui:
+    enabled: true
+    path: /swagger-ui.html
+  packages-to-scan: com.alias.domain.controller

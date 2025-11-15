@@ -40,7 +40,7 @@ export const InputBox = ({
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          disabled={loading || disabled}
+          disabled={disabled}
           rows={3}
         />
         <button

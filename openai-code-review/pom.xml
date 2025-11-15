@@ -10,21 +10,50 @@
     <packaging>pom</packaging>
 
     <modules>
-        <module>openai-code-review-sdk</module>
-        <module>openai-code-review-test</module>
+        <module>openai-code-review-api</module>
+        <module>openai-code-review-trigger</module>
+        <module>openai-code-review-app</module>
     </modules>
 
     <properties>
+        <java.version>17</java.version>
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <spring-ai.version>1.0.0</spring-ai.version>
+        <retrofit2.version>2.9.0</retrofit2.version>
+        <slf4j.version>2.0.6</slf4j.version>
     </properties>
 
-    <parent>
-        <groupId>com.alias</groupId>
-        <artifactId>alias-rag-review</artifactId>
-        <version>1.0</version>
-    </parent>
+    <repositories>
+        <!--        <repository>-->
+        <!--            <id>spring-milestones</id>-->
+        <!--            <name>Spring Milestones</name>-->
+        <!--            <url>https://repo.spring.io/milestone</url>-->
+        <!--            <snapshots>-->
+        <!--                <enabled>false</enabled>-->
+        <!--            </snapshots>-->
+        <!--        </repository>-->
+        <!--        <repository>-->
+        <!--            <id>spring-snapshots</id>-->
+        <!--            <name>Spring Snapshots</name>-->
+        <!--            <url>https://repo.spring.io/snapshot</url>-->
+        <!--            <releases>-->
+        <!--                <enabled>false</enabled>-->
+        <!--            </releases>-->
+        <!--        </repository>-->
+        <repository>
+            <id>central</id>
+            <url>https://repo.maven.apache.org/maven2</url>
+        </repository>
+    </repositories>
+
+    <licenses>
+        <license>
+            <name>Apache License, Version 2.0</name>
+            <url>https://www.apache.org/licenses/LICENSE-2.0</url>
+        </license>
+    </licenses>
 
     <dependencyManagement>
         <dependencies>
@@ -32,6 +61,13 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-dependencies</artifactId>
                 <version>3.2.3</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.springframework.ai</groupId>
+                <artifactId>spring-ai-bom</artifactId>
+                <version>1.0.0-M6</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
@@ -118,6 +154,17 @@
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>versions-maven-plugin</artifactId>
                 <version>2.7</version>
+            </plugin>
+            <plugin>
+                <groupId>com.diffplug.spotless</groupId>
+                <artifactId>spotless-maven-plugin</artifactId>
+                <configuration>
+                    <java>
+                        <eclipse>
+                            <file>../eclipse-java-formatter.xml</file>
+                        </eclipse>
+                    </java>
+                </configuration>
             </plugin>
         </plugins>
     </build>

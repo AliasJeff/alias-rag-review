@@ -14,6 +14,7 @@ export default function Home() {
     loading: clientUserLoading,
     error: clientUserError,
   } = useClientUser();
+
   const {
     conversations,
     loading: conversationsLoading,
@@ -107,6 +108,7 @@ export default function Home() {
         onCreateConversation={handleCreateConversation}
         onDeleteConversation={handleDeleteConversation}
         loading={conversationsLoading}
+        clientUser={clientUser}
       />
       <ChatArea
         messages={messages}

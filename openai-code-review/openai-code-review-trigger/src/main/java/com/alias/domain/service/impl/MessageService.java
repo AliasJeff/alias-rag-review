@@ -37,7 +37,7 @@ public class MessageService implements IMessageService {
             message.setType("text");
         }
 
-        return messageRepository.save(message);
+        return messageRepository.saveAndReturn(message);
     }
 
     @Override
@@ -55,7 +55,7 @@ public class MessageService implements IMessageService {
     @Override
     public List<Message> getMessagesByConversationId(UUID conversationId, int limit, int offset) {
         log.debug("Getting messages for conversation with pagination: conversationId={}, limit={}, offset={}", conversationId, limit, offset);
-        return messageRepository.findByConversationId(conversationId, limit, offset);
+        return messageRepository.findByConversationIdWithPagination(conversationId, limit, offset);
     }
 
     @Override

@@ -37,7 +37,7 @@ public class ConversationService implements IConversationService {
             conversation.setStatus("active");
         }
 
-        return conversationRepository.save(conversation);
+        return conversationRepository.saveAndReturn(conversation);
     }
 
     @Override
@@ -56,7 +56,7 @@ public class ConversationService implements IConversationService {
     public Conversation updateConversation(Conversation conversation) {
         log.info("Updating conversation: {}", conversation.getId());
         conversation.setUpdatedAt(LocalDateTime.now());
-        return conversationRepository.save(conversation);
+        return conversationRepository.saveAndReturn(conversation);
     }
 
     @Override
@@ -67,7 +67,7 @@ public class ConversationService implements IConversationService {
 
         conversation.setStatus(status);
         conversation.setUpdatedAt(LocalDateTime.now());
-        conversationRepository.save(conversation);
+        conversationRepository.saveAndReturn(conversation);
     }
 
     @Override

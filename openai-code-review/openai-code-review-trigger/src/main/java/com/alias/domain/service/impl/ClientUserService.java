@@ -27,7 +27,7 @@ public class ClientUserService implements IClientUserService {
         return clientUserRepository.findByClientIdentifier(clientIdentifier).orElseGet(() -> {
             log.info("Creating new client user with identifier: {}", clientIdentifier);
             ClientUser newUser = ClientUser.builder().id(UUID.randomUUID()).clientIdentifier(clientIdentifier).encrypted(true).createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
-            return clientUserRepository.save(newUser);
+            return clientUserRepository.saveAndReturn(newUser);
         });
     }
 
@@ -47,7 +47,7 @@ public class ClientUserService implements IClientUserService {
     public ClientUser saveClientUser(ClientUser clientUser) {
         log.info("Saving client user: {}", clientUser.getClientIdentifier());
         clientUser.setUpdatedAt(LocalDateTime.now());
-        return clientUserRepository.save(clientUser);
+        return clientUserRepository.saveAndReturn(clientUser);
     }
 
     @Override
@@ -57,7 +57,7 @@ public class ClientUserService implements IClientUserService {
 
         clientUser.setGithubToken(githubToken);
         clientUser.setUpdatedAt(LocalDateTime.now());
-        clientUserRepository.save(clientUser);
+        clientUserRepository.saveAndReturn(clientUser);
     }
 
     @Override
@@ -67,7 +67,7 @@ public class ClientUserService implements IClientUserService {
 
         clientUser.setOpenaiApiKey(openaiApiKey);
         clientUser.setUpdatedAt(LocalDateTime.now());
-        clientUserRepository.save(clientUser);
+        clientUserRepository.saveAndReturn(clientUser);
     }
 
     @Override

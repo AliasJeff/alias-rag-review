@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { Conversation } from "@/types";
-import { apiService } from "@/services/api";
+import { conversationApi } from "@/services/api";
 
 export const useConversations = () => {
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -11,7 +11,7 @@ export const useConversations = () => {
     setLoading(true);
     setError(null);
     try {
-      const data = await apiService.getConversations();
+      const data = await conversationApi.getConversations();
       setConversations(data);
     } catch (err) {
       setError(
@@ -24,7 +24,7 @@ export const useConversations = () => {
 
   const createConversation = useCallback(async (title: string) => {
     try {
-      const newConversation = await apiService.createConversation(title);
+      const newConversation = await conversationApi.createConversation(title);
       setConversations((prev) => [newConversation, ...prev]);
       return newConversation;
     } catch (err) {
@@ -37,7 +37,7 @@ export const useConversations = () => {
 
   const deleteConversation = useCallback(async (id: string) => {
     try {
-      await apiService.deleteConversation(id);
+      await conversationApi.deleteConversation(id);
       setConversations((prev) => prev.filter((conv) => conv.id !== id));
     } catch (err) {
       setError(

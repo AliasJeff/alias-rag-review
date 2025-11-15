@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { apiService, ClientUser } from "@/services/api";
 import { getOrCreateClientIdentifier } from "@/utils/clientIdentifier";
+import { clientUserApi } from "@/services/api";
+import { ClientUser } from "@/types";
 
 export function useClientUser() {
   const [clientUser, setClientUser] = useState<ClientUser | null>(null);
@@ -17,7 +18,9 @@ export function useClientUser() {
         const clientIdentifier = getOrCreateClientIdentifier();
 
         // Send request to backend to get or create client user
-        const user = await apiService.getOrCreateClientUser(clientIdentifier);
+        const user = await clientUserApi.getOrCreateClientUser(
+          clientIdentifier
+        );
         setClientUser(user);
       } catch (err) {
         const errorMessage =

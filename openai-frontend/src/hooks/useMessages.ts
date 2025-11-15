@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { Message } from "@/types";
-import { apiService } from "@/services/api";
+import { messageApi } from "@/services/api";
 
 export const useMessages = (conversationId: string | null) => {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -13,7 +13,7 @@ export const useMessages = (conversationId: string | null) => {
     setLoading(true);
     setError(null);
     try {
-      const data = await apiService.getMessages(conversationId);
+      const data = await messageApi.getMessages(conversationId);
       setMessages(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to fetch messages");
@@ -27,7 +27,7 @@ export const useMessages = (conversationId: string | null) => {
       if (!conversationId) return;
 
       try {
-        const newMessage = await apiService.sendMessage(
+        const newMessage = await messageApi.sendMessage(
           conversationId,
           content
         );

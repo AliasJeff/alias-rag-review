@@ -14,6 +14,7 @@ interface SidebarProps {
   onCreateConversation: () => void;
   onDeleteConversation: (id: string) => void;
   loading?: boolean;
+  clientUser?: any;
 }
 
 export const Sidebar = ({
@@ -23,6 +24,7 @@ export const Sidebar = ({
   onCreateConversation,
   onDeleteConversation,
   loading = false,
+  clientUser,
 }: SidebarProps) => {
   const [showConfigDrawer, setShowConfigDrawer] = useState(false);
 
@@ -51,6 +53,7 @@ export const Sidebar = ({
       <ConfigDrawer
         isOpen={showConfigDrawer}
         onClose={() => setShowConfigDrawer(false)}
+        clientUser={clientUser}
       />
     </div>
   );

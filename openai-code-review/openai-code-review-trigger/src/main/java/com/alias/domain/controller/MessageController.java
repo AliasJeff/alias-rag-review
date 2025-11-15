@@ -66,7 +66,7 @@ public class MessageController {
      */
     @Operation(summary = "获取消息", description = "根据消息ID获取消息详情")
     @GetMapping("/{messageId}")
-    public Response<Message> getMessage(@PathVariable UUID messageId) {
+    public Response<Message> getMessage(@PathVariable("messageId") UUID messageId) {
         try {
             log.info("Getting message: {}", messageId);
             Message message = messageService.getMessageById(messageId);
@@ -90,7 +90,7 @@ public class MessageController {
      */
     @Operation(summary = "获取对话的所有消息", description = "获取指定对话的所有消息列表")
     @GetMapping("/conversation/{conversationId}")
-    public Response<List<Message>> getConversationMessages(@PathVariable UUID conversationId) {
+    public Response<List<Message>> getConversationMessages(@PathVariable("conversationId") UUID conversationId) {
         try {
             log.info("Getting messages for conversation: {}", conversationId);
             List<Message> messages = messageService.getMessagesByConversationId(conversationId);
@@ -113,7 +113,7 @@ public class MessageController {
     @Operation(summary = "分页获取对话消息", description = "分页获取指定对话的消息列表")
     @GetMapping("/conversation/{conversationId}/paginated")
     public Response<List<Message>> getConversationMessagesPaginated(
-                                                                    @PathVariable UUID conversationId, @RequestParam(defaultValue = "20") int limit, @RequestParam(defaultValue = "0") int offset) {
+                                                                    @PathVariable("conversationId") UUID conversationId, @RequestParam(value = "limit", defaultValue = "20") int limit, @RequestParam(value = "offset", defaultValue = "0") int offset) {
         try {
             log.info("Getting paginated messages for conversation: conversationId={}, limit={}, offset={}", conversationId, limit, offset);
             List<Message> messages = messageService.getMessagesByConversationId(conversationId, limit, offset);
@@ -133,7 +133,7 @@ public class MessageController {
      */
     @Operation(summary = "删除消息", description = "删除指定的消息")
     @DeleteMapping("/{messageId}")
-    public Response<String> deleteMessage(@PathVariable UUID messageId) {
+    public Response<String> deleteMessage(@PathVariable("messageId") UUID messageId) {
         try {
             log.info("Deleting message: {}", messageId);
             messageService.deleteMessage(messageId);
@@ -153,7 +153,7 @@ public class MessageController {
      */
     @Operation(summary = "清空对话消息", description = "删除指定对话的所有消息")
     @DeleteMapping("/conversation/{conversationId}")
-    public Response<String> deleteConversationMessages(@PathVariable UUID conversationId) {
+    public Response<String> deleteConversationMessages(@PathVariable("conversationId") UUID conversationId) {
         try {
             log.info("Deleting all messages for conversation: {}", conversationId);
             messageService.deleteMessagesByConversationId(conversationId);
@@ -173,7 +173,7 @@ public class MessageController {
      */
     @Operation(summary = "获取对话消息数", description = "获取指定对话的消息总数")
     @GetMapping("/conversation/{conversationId}/count")
-    public Response<Long> getMessageCount(@PathVariable UUID conversationId) {
+    public Response<Long> getMessageCount(@PathVariable("conversationId") UUID conversationId) {
         try {
             log.info("Getting message count for conversation: {}", conversationId);
             long count = messageService.getMessageCount(conversationId);

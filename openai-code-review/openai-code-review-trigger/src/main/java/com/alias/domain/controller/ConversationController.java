@@ -58,7 +58,7 @@ public class ConversationController {
      */
     @Operation(summary = "获取对话", description = "根据对话ID获取对话详情")
     @GetMapping("/{conversationId}")
-    public Response<Conversation> getConversation(@PathVariable UUID conversationId) {
+    public Response<Conversation> getConversation(@PathVariable("conversationId") UUID conversationId) {
         try {
             log.info("Getting conversation: {}", conversationId);
             Conversation conversation = conversationService.getConversationById(conversationId);
@@ -82,7 +82,7 @@ public class ConversationController {
      */
     @Operation(summary = "获取客户端的所有对话", description = "获取指定客户端用户的所有对话列表")
     @GetMapping("/client/{clientIdentifier}")
-    public Response<List<Conversation>> getClientConversations(@PathVariable UUID clientIdentifier) {
+    public Response<List<Conversation>> getClientConversations(@PathVariable("clientIdentifier") UUID clientIdentifier) {
         try {
             log.info("Getting conversations for client: {}", clientIdentifier);
             List<Conversation> conversations = conversationService.getConversationsByClientIdentifier(clientIdentifier);
@@ -104,7 +104,7 @@ public class ConversationController {
     @Operation(summary = "更新对话", description = "更新对话的信息")
     @PutMapping("/{conversationId}")
     public Response<Conversation> updateConversation(
-                                                     @PathVariable UUID conversationId, @RequestBody Conversation conversation) {
+                                                     @PathVariable("conversationId") UUID conversationId, @RequestBody Conversation conversation) {
         try {
             conversation.setId(conversationId);
             log.info("Updating conversation: {}", conversationId);
@@ -127,7 +127,7 @@ public class ConversationController {
     @Operation(summary = "更新对话状态", description = "更新对话的状态（active/closed/archived/error）")
     @PatchMapping("/{conversationId}/status")
     public Response<String> updateConversationStatus(
-                                                     @PathVariable UUID conversationId, @RequestParam String status) {
+                                                     @PathVariable("conversationId") UUID conversationId, @RequestParam("status") String status) {
         try {
             log.info("Updating conversation status: conversationId={}, status={}", conversationId, status);
             conversationService.updateConversationStatus(conversationId, status);
@@ -147,7 +147,7 @@ public class ConversationController {
      */
     @Operation(summary = "删除对话", description = "删除指定的对话及其所有消息")
     @DeleteMapping("/{conversationId}")
-    public Response<String> deleteConversation(@PathVariable UUID conversationId) {
+    public Response<String> deleteConversation(@PathVariable("conversationId") UUID conversationId) {
         try {
             log.info("Deleting conversation: {}", conversationId);
             conversationService.deleteConversation(conversationId);
@@ -167,7 +167,7 @@ public class ConversationController {
      */
     @Operation(summary = "根据PR URL获取对话", description = "获取与指定PR URL关联的所有对话")
     @GetMapping("/search/pr-url")
-    public Response<List<Conversation>> getConversationsByPrUrl(@RequestParam String prUrl) {
+    public Response<List<Conversation>> getConversationsByPrUrl(@RequestParam("prUrl") String prUrl) {
         try {
             log.info("Getting conversations by PR URL: {}", prUrl);
             List<Conversation> conversations = conversationService.getConversationsByPrUrl(prUrl);

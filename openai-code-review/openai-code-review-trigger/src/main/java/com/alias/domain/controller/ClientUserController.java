@@ -33,7 +33,7 @@ public class ClientUserController {
      */
     @Operation(summary = "获取或创建客户端用户", description = "根据客户端标识符获取或创建客户端用户")
     @PostMapping("/get-or-create/{clientIdentifier}")
-    public Response<ClientUser> getOrCreateClientUser(@PathVariable UUID clientIdentifier) {
+    public Response<ClientUser> getOrCreateClientUser(@PathVariable("clientIdentifier") UUID clientIdentifier) {
         try {
             log.info("Getting or creating client user: {}", clientIdentifier);
             ClientUser clientUser = clientUserService.getOrCreateClientUser(clientIdentifier);
@@ -45,17 +45,17 @@ public class ClientUserController {
     }
 
     /**
-     * Get client user by ID
+     * Get client user by Identifier
      *
-     * @param id the user ID
+     * @param clientIdentifier the user Identifier
      * @return client user
      */
-    @Operation(summary = "根据ID获取客户端用户", description = "根据用户ID获取客户端用户信息")
-    @GetMapping("/{id}")
-    public Response<ClientUser> getClientUserById(@PathVariable UUID id) {
+    @Operation(summary = "根据Identifier获取客户端用户", description = "根据用户Identifier获取客户端用户信息")
+    @GetMapping("/{clientIdentifier}")
+    public Response<ClientUser> getClientUserByClientIdentifier(@PathVariable("clientIdentifier") UUID clientIdentifier) {
         try {
-            log.info("Getting client user by ID: {}", id);
-            ClientUser clientUser = clientUserService.getClientUserById(id);
+            log.info("Getting client user by identifier: {}", clientIdentifier);
+            ClientUser clientUser = clientUserService.getClientUserByIdentifier(clientIdentifier);
 
             if (clientUser == null) {
                 return Response.<ClientUser>builder().code("4004").info("Client user not found").build();
@@ -63,7 +63,7 @@ public class ClientUserController {
 
             return Response.<ClientUser>builder().code("0000").info("Success").data(clientUser).build();
         } catch (Exception e) {
-            log.error("Failed to get client user: {}", id, e);
+            log.error("Failed to get client user: {}", clientIdentifier, e);
             return Response.<ClientUser>builder().code("5000").info("Failed: " + e.getMessage()).build();
         }
     }
@@ -78,7 +78,7 @@ public class ClientUserController {
     @Operation(summary = "更新GitHub Token", description = "为客户端用户更新加密的GitHub Token")
     @PutMapping("/{clientIdentifier}/github-token")
     public Response<String> updateGithubToken(
-                                              @PathVariable UUID clientIdentifier, @RequestParam String githubToken) {
+                                              @PathVariable("clientIdentifier") UUID clientIdentifier, @RequestParam("githubToken") String githubToken) {
         try {
             log.info("Updating GitHub token for client user: {}", clientIdentifier);
             clientUserService.updateGithubToken(clientIdentifier, githubToken);
@@ -99,7 +99,7 @@ public class ClientUserController {
     @Operation(summary = "更新OpenAI API Key", description = "为客户端用户更新加密的OpenAI API Key")
     @PutMapping("/{clientIdentifier}/openai-api-key")
     public Response<String> updateOpenaiApiKey(
-                                               @PathVariable UUID clientIdentifier, @RequestParam String openaiApiKey) {
+                                               @PathVariable("clientIdentifier") UUID clientIdentifier, @RequestParam("openaiApiKey") String openaiApiKey) {
         try {
             log.info("Updating OpenAI API key for client user: {}", clientIdentifier);
             clientUserService.updateOpenaiApiKey(clientIdentifier, openaiApiKey);
@@ -118,7 +118,7 @@ public class ClientUserController {
      */
     @Operation(summary = "删除客户端用户", description = "删除指定的客户端用户及其所有关联数据")
     @DeleteMapping("/{clientIdentifier}")
-    public Response<String> deleteClientUser(@PathVariable UUID clientIdentifier) {
+    public Response<String> deleteClientUser(@PathVariable("clientIdentifier") UUID clientIdentifier) {
         try {
             log.info("Deleting client user: {}", clientIdentifier);
             clientUserService.deleteClientUser(clientIdentifier);

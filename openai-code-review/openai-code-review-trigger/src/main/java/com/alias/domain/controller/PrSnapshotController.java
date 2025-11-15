@@ -62,7 +62,7 @@ public class PrSnapshotController {
      */
     @Operation(summary = "获取PR快照", description = "根据快照ID获取PR快照详情")
     @GetMapping("/{snapshotId}")
-    public Response<PrSnapshot> getSnapshot(@PathVariable UUID snapshotId) {
+    public Response<PrSnapshot> getSnapshot(@PathVariable("snapshotId") UUID snapshotId) {
         try {
             log.info("Getting PR snapshot: {}", snapshotId);
             PrSnapshot snapshot = prSnapshotService.getSnapshotById(snapshotId);
@@ -86,7 +86,7 @@ public class PrSnapshotController {
      */
     @Operation(summary = "获取对话的所有PR快照", description = "获取指定对话的所有PR快照列表")
     @GetMapping("/conversation/{conversationId}")
-    public Response<List<PrSnapshot>> getConversationSnapshots(@PathVariable UUID conversationId) {
+    public Response<List<PrSnapshot>> getConversationSnapshots(@PathVariable("conversationId") UUID conversationId) {
         try {
             log.info("Getting PR snapshots for conversation: {}", conversationId);
             List<PrSnapshot> snapshots = prSnapshotService.getSnapshotsByConversationId(conversationId);
@@ -108,7 +108,7 @@ public class PrSnapshotController {
     @Operation(summary = "根据文件路径获取快照", description = "根据对话ID和文件路径获取PR快照")
     @GetMapping("/conversation/{conversationId}/file")
     public Response<PrSnapshot> getSnapshotByFilePath(
-                                                      @PathVariable UUID conversationId, @RequestParam String filePath) {
+                                                      @PathVariable("conversationId") UUID conversationId, @RequestParam("filePath") String filePath) {
         try {
             log.info("Getting PR snapshot by file path: conversationId={}, filePath={}", conversationId, filePath);
             PrSnapshot snapshot = prSnapshotService.getSnapshotByConversationAndFilePath(conversationId, filePath);
@@ -134,7 +134,7 @@ public class PrSnapshotController {
     @Operation(summary = "更新PR快照", description = "更新PR快照的信息")
     @PutMapping("/{snapshotId}")
     public Response<PrSnapshot> updateSnapshot(
-                                               @PathVariable UUID snapshotId, @RequestBody PrSnapshot snapshot) {
+                                               @PathVariable("snapshotId") UUID snapshotId, @RequestBody PrSnapshot snapshot) {
         try {
             snapshot.setId(snapshotId);
             log.info("Updating PR snapshot: {}", snapshotId);
@@ -155,7 +155,7 @@ public class PrSnapshotController {
      */
     @Operation(summary = "删除PR快照", description = "删除指定的PR快照")
     @DeleteMapping("/{snapshotId}")
-    public Response<String> deleteSnapshot(@PathVariable UUID snapshotId) {
+    public Response<String> deleteSnapshot(@PathVariable("snapshotId") UUID snapshotId) {
         try {
             log.info("Deleting PR snapshot: {}", snapshotId);
             prSnapshotService.deleteSnapshot(snapshotId);
@@ -175,7 +175,7 @@ public class PrSnapshotController {
      */
     @Operation(summary = "清空对话快照", description = "删除指定对话的所有PR快照")
     @DeleteMapping("/conversation/{conversationId}")
-    public Response<String> deleteConversationSnapshots(@PathVariable UUID conversationId) {
+    public Response<String> deleteConversationSnapshots(@PathVariable("conversationId") UUID conversationId) {
         try {
             log.info("Deleting all PR snapshots for conversation: {}", conversationId);
             prSnapshotService.deleteSnapshotsByConversationId(conversationId);
@@ -197,7 +197,7 @@ public class PrSnapshotController {
     @Operation(summary = "搜索PR快照", description = "根据文件路径模式搜索PR快照")
     @GetMapping("/conversation/{conversationId}/search")
     public Response<List<PrSnapshot>> searchSnapshots(
-                                                      @PathVariable UUID conversationId, @RequestParam String filePathPattern) {
+                                                      @PathVariable("conversationId") UUID conversationId, @RequestParam("filePathPattern") String filePathPattern) {
         try {
             log.info("Searching PR snapshots: conversationId={}, pattern={}", conversationId, filePathPattern);
             List<PrSnapshot> snapshots = prSnapshotService.searchSnapshotsByFilePath(conversationId, filePathPattern);

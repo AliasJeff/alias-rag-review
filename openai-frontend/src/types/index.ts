@@ -6,6 +6,19 @@ export interface Conversation {
   updatedAt: string;
 }
 
+// 客户端用户类型
+export interface ClientUser {
+  id: string;
+  clientIdentifier: string;
+  githubToken?: string;
+  openaiApiKey?: string;
+  model?: string;
+  temperature?: number;
+  maxTokens?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 // 消息类型
 export interface Message {
   id: string;

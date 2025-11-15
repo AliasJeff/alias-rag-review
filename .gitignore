@@ -39,3 +39,4 @@ dist/
 **/application-local.yml
 
 /dev-ops/models/
+/dev-ops/postgres/data/

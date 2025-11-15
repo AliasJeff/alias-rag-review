@@ -33,7 +33,7 @@ public class PrSnapshotService implements IPrSnapshotService {
             snapshot.setCreatedAt(LocalDateTime.now());
         }
 
-        return prSnapshotRepository.save(snapshot);
+        return prSnapshotRepository.saveAndReturn(snapshot);
     }
 
     @Override
@@ -57,7 +57,7 @@ public class PrSnapshotService implements IPrSnapshotService {
     @Override
     public PrSnapshot updateSnapshot(PrSnapshot snapshot) {
         log.info("Updating PR snapshot: {}", snapshot.getId());
-        return prSnapshotRepository.save(snapshot);
+        return prSnapshotRepository.saveAndReturn(snapshot);
     }
 
     @Override

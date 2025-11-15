@@ -7,7 +7,7 @@ import {
   SidebarErrorBoundary,
   ChatAreaErrorBoundary,
 } from "@/components/ErrorBoundary";
-import { useConversations, useMessages, useClientUser, useChat } from "@/hooks";
+import { useConversations, useClientUser, useChat } from "@/hooks";
 import styles from "./page.module.css";
 
 export default function Home() {
@@ -29,12 +29,14 @@ export default function Home() {
     deleteConversation,
   } = useConversations(clientUser?.clientIdentifier);
 
-  const { messages, loading: messagesLoading } =
-    useMessages(activeConversationId);
-
   const {
-    // TODO: use chatStream
-    chat,
+    messages,
+    loading: messagesLoading,
+    chatStream,
+    streaming,
+    error: chatError,
+    stopStream,
+    clearContext,
   } = useChat({
     conversationId: activeConversationId,
     userId: clientUser?.clientIdentifier,
@@ -85,7 +87,7 @@ export default function Home() {
       return;
     }
     try {
-      await chat(content);
+      await chatStream(content);
     } catch (err) {
       console.error("Failed to send message:", err);
     }
@@ -153,6 +155,10 @@ export default function Home() {
             onSendMessage={handleChat}
             loading={messagesLoading}
             disabled={!activeConversationId}
+            streaming={streaming}
+            error={chatError}
+            onStopStream={stopStream}
+            onClearContext={clearContext}
           />
         </ChatAreaErrorBoundary>
       </div>

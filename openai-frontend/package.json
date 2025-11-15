@@ -19,8 +19,7 @@
     "react-dom": "19.2.0",
     "react-hot-toast": "^2.4.1",
     "react-markdown": "^10.1.0",
-    "rehype-highlight": "^7.0.2",
-    "tailwind-merge": "^3.4.0"
+    "rehype-highlight": "^7.0.2"
   },
   "devDependencies": {
     "@types/node": "20.19.25",

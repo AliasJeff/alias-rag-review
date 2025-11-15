@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { ChatRequest, ChatResponse, Message } from "@/types";
 import { chatApi } from "@/services/modules/chat";
+import { useMessages } from "./useMessages";
 
 export interface UseChatOptions {
   conversationId?: string;
@@ -14,11 +15,10 @@ export const useChat = (options: UseChatOptions) => {
   const [conversationId, setConversationId] = useState<string | undefined>(
     initialConvId
   );
-  const [messages, setMessages] = useState<Message[]>([]);
+  const { messages, setMessages } = useMessages(conversationId);
   const [loading, setLoading] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const eventSourceRef = useRef<EventSource | null>(null);
 
   /**
    * 同步 conversationId 的变化
@@ -44,7 +44,7 @@ export const useChat = (options: UseChatOptions) => {
       setError(errorMsg);
       throw err;
     }
-  }, [conversationId]);
+  }, [conversationId, setMessages]);
 
   /**
    * 发送聊天消息（非流式）
@@ -103,7 +103,7 @@ export const useChat = (options: UseChatOptions) => {
         setLoading(false);
       }
     },
-    [conversationId, userId, systemPrompt]
+    [conversationId, userId, systemPrompt, setMessages]
   );
 
   /**
@@ -128,76 +128,91 @@ export const useChat = (options: UseChatOptions) => {
             systemPrompt,
           };
 
-          // Close previous event source if exists
-          if (eventSourceRef.current) {
-            eventSourceRef.current.close();
-          }
-
-          const eventSource = chatApi.chatStream(request);
-          eventSourceRef.current = eventSource;
-
           let fullContent = "";
           let newConversationId = conversationId;
+          const userMessageId = `user-${Date.now()}`;
+          const assistantMessageId = `assistant-${Date.now()}`;
 
-          eventSource.addEventListener("message", (event) => {
-            try {
-              const data = JSON.parse(event.data);
+          // Add user message immediately
+          const userMessage: Message = {
+            id: userMessageId,
+            conversationId: conversationId || "",
+            role: "user",
+            content: message,
+            createdAt: new Date().toISOString(),
+          };
 
-              if (data.conversationId) {
-                newConversationId = data.conversationId;
-                if (!conversationId) {
-                  setConversationId(data.conversationId);
+          // Add empty assistant message immediately
+          const assistantMessage: Message = {
+            id: assistantMessageId,
+            conversationId: conversationId || "",
+            role: "assistant",
+            content: "",
+            createdAt: new Date().toISOString(),
+          };
+
+          setMessages((prev) => [...prev, userMessage, assistantMessage]);
+
+          chatApi
+            .chatStream(
+              request,
+              (chunk: string) => {
+                // Handle chunk callback - chunk is JSON string
+                try {
+                  const data = JSON.parse(chunk);
+
+                  if (data.conversationId) {
+                    newConversationId = data.conversationId;
+                    if (!conversationId) {
+                      setConversationId(data.conversationId);
+                      // Update conversation ID in messages
+                      setMessages((prev) =>
+                        prev.map((msg) =>
+                          msg.id === userMessageId ||
+                          msg.id === assistantMessageId
+                            ? { ...msg, conversationId: data.conversationId }
+                            : msg
+                        )
+                      );
+                    }
+                  }
+
+                  if (data.content) {
+                    fullContent += data.content;
+                    onChunk?.(data.content);
+
+                    // Update assistant message with new content
+                    setMessages((prev) =>
+                      prev.map((msg) =>
+                        msg.id === assistantMessageId
+                          ? { ...msg, content: fullContent }
+                          : msg
+                      )
+                    );
+                  }
+                } catch (err) {
+                  console.error("Failed to parse chunk:", err, "chunk:", chunk);
                 }
+              },
+              (error: string) => {
+                // Handle error callback
+                setStreaming(false);
+                setError(error);
+                reject(new Error(error));
+              },
+              () => {
+                // Handle complete callback
+                setStreaming(false);
+                resolve();
               }
-
-              if (data.content) {
-                fullContent += data.content;
-                onChunk?.(data.content);
-              }
-            } catch (err) {
-              console.error("Failed to parse message:", err);
-            }
-          });
-
-          eventSource.addEventListener("error", (event) => {
-            eventSource.close();
-            eventSourceRef.current = null;
-            setStreaming(false);
-
-            const errorMsg =
-              event instanceof Event && "data" in event
-                ? (event as any).data
-                : "Stream error occurred";
-            setError(errorMsg);
-            reject(new Error(errorMsg));
-          });
-
-          eventSource.addEventListener("done", () => {
-            eventSource.close();
-            eventSourceRef.current = null;
-            setStreaming(false);
-
-            // Add user message
-            const userMessage: Message = {
-              id: `user-${Date.now()}`,
-              conversationId: newConversationId || conversationId || "",
-              role: "user",
-              content: message,
-              createdAt: new Date().toISOString(),
-            };
-
-            // Add assistant message
-            const assistantMessage: Message = {
-              id: `assistant-${Date.now()}`,
-              conversationId: newConversationId || conversationId || "",
-              role: "assistant",
-              content: fullContent,
-              createdAt: new Date().toISOString(),
-            };
-
-            setMessages((prev) => [...prev, userMessage, assistantMessage]);
-            resolve();
-          });
+            )
+            .catch((err) => {
+              setStreaming(false);
+              const errorMsg =
+                err instanceof Error ? err.message : "Failed to start stream";
+              setError(errorMsg);
+              reject(err);
+            });
         } catch (err) {
           setStreaming(false);
           const errorMsg =
@@ -207,7 +222,7 @@ export const useChat = (options: UseChatOptions) => {
         }
       });
     },
-    [conversationId, userId, systemPrompt]
+    [conversationId, userId, systemPrompt, setMessages]
   );
 
   /**
@@ -226,7 +241,7 @@ export const useChat = (options: UseChatOptions) => {
       setError(errorMsg);
       throw err;
     }
-  }, [conversationId]);
+  }, [conversationId, setMessages]);
 
   /**
    * 删除对话
@@ -245,17 +260,13 @@ export const useChat = (options: UseChatOptions) => {
       setError(errorMsg);
       throw err;
     }
-  }, [conversationId]);
+  }, [conversationId, setMessages]);
 
   /**
    * 停止流式响应
    */
   const stopStream = useCallback(() => {
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
-      eventSourceRef.current = null;
-      setStreaming(false);
-    }
+    setStreaming(false);
   }, []);
 
   return {

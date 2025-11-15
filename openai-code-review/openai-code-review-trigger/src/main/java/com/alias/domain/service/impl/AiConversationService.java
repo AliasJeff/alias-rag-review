@@ -140,12 +140,13 @@ public class AiConversationService implements IAiConversationService {
             chatRequest.setModel(request.getModel() != null ? request.getModel() : context.getModel());
             chatRequest.setMessages(messages);
 
-            // Send initial message
-            emitter.send(SseEmitter.event().id(context.getConversationId()).name("start").data("Streaming started"));
+            // Send initial message with conversation ID
+            String initData = "{\"conversationId\":\"" + context.getConversationId() + "\"}";
+            emitter.send(SseEmitter.event().id(context.getConversationId()).name("start").data(initData));
 
             // Call OpenAI API with streaming
             StringBuilder fullResponse = new StringBuilder();
-            streamChatCompletion(chatRequest, emitter, fullResponse);
+            streamChatCompletion(chatRequest, emitter, context.getConversationId(), fullResponse);
 
             // Add assistant message to context
             ChatMessage assistantMessage = ChatMessage.builder().id(UUID.randomUUID().toString()).role("assistant").content(fullResponse.toString()).createdAt(LocalDateTime.now()).build();
@@ -278,7 +279,7 @@ public class AiConversationService implements IAiConversationService {
     /**
      * Stream chat completion using Spring AI ChatClient
      */
-    private void streamChatCompletion(ChatCompletionRequestDTO chatRequest, SseEmitter emitter, StringBuilder fullResponse) throws IOException {
+    private void streamChatCompletion(ChatCompletionRequestDTO chatRequest, SseEmitter emitter, String conversationId, StringBuilder fullResponse) throws IOException {
         try {
             // Extract user message
             String userMessage = chatRequest.getMessages().stream().filter(msg -> "user".equals(msg.getRole())).map(ChatCompletionRequestDTO.Prompt::getContent).findFirst().orElse("");
@@ -295,7 +296,10 @@ public class AiConversationService implements IAiConversationService {
             String[] words = content.split("\\s+");
             for (String word : words) {
                 fullResponse.append(word).append(" ");
-                emitter.send(SseEmitter.event().id(UUID.randomUUID().toString()).name("message").data(word + " "));
+
+                // Create JSON response with content and conversationId
+                String jsonData = "{\"content\":\"" + escapeJson(word + " ") + "\",\"conversationId\":\"" + conversationId + "\"}";
+                emitter.send(SseEmitter.event().id(UUID.randomUUID().toString()).name("message").data(jsonData));
 
                 // Small delay to simulate streaming
                 Thread.sleep(10);
@@ -306,5 +310,15 @@ public class AiConversationService implements IAiConversationService {
             logger.error("Streaming interrupted", e);
             throw new IOException("Streaming interrupted", e);
         }
+    }
+
+    /**
+     * Escape JSON string
+     */
+    private String escapeJson(String input) {
+        if (input == null) {
+            return "";
+        }
+        return input.replace("\\", "\\\\").replace("\"", "\\\"").replace("\b", "\\b").replace("\f", "\\f").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t");
     }
 }

@@ -14,8 +14,6 @@ interface ChatAreaProps {
   onStopStream?: () => void;
   onClearContext?: () => void;
   error?: string | null;
-  useStreamMode?: boolean;
-  onToggleStreamMode?: (useStream: boolean) => void;
 }
 
 export const ChatArea = ({
@@ -27,8 +25,6 @@ export const ChatArea = ({
   onStopStream,
   onClearContext,
   error,
-  useStreamMode = true,
-  onToggleStreamMode,
 }: ChatAreaProps) => {
   return (
     <div className={styles.container}>
@@ -80,25 +76,6 @@ export const ChatArea = ({
             >
               清空历史
             </button>
-          )}
-          {onToggleStreamMode && (
-            <label
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "6px",
-                cursor: "pointer",
-                fontSize: "12px",
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={useStreamMode}
-                onChange={(e) => onToggleStreamMode(e.target.checked)}
-                disabled={streaming}
-              />
-              流式模式
-            </label>
           )}
         </div>
       </div>

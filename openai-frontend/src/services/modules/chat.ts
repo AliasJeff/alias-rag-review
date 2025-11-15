@@ -18,22 +18,88 @@ export const chatApi = {
 
   /**
    * 发送聊天消息（流式）
-   * 返回 EventSource 用于处理 SSE
+   * 使用 fetch + ReadableStream 处理流式响应
    */
-  chatStream(request: ChatRequest): EventSource {
-    const params = new URLSearchParams({
-      message: request.message,
-      userId: request.userId,
-      ...(request.conversationId && { conversationId: request.conversationId }),
-      ...(request.systemPrompt && { systemPrompt: request.systemPrompt }),
-    });
+  async chatStream(
+    request: ChatRequest,
+    onChunk?: (chunk: string) => void,
+    onError?: (error: string) => void,
+    onComplete?: () => void
+  ): Promise<void> {
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL;
 
-    const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
-    const eventSource = new EventSource(
-      `${baseUrl}/api/v1/ai-chat/chat-stream?${params.toString()}`
-    );
+    try {
+      const response = await fetch(`${baseUrl}/api/v1/ai-chat/chat-stream`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(request),
+      });
 
-    return eventSource;
+      if (!response.ok) {
+        const error = `HTTP ${response.status}: ${response.statusText}`;
+        onError?.(error);
+        throw new Error(error);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        const error = "Response body is not readable";
+        onError?.(error);
+        throw new Error(error);
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          onComplete?.();
+          break;
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+
+        // SSE 事件按双换行分割
+        const events = buffer.split(/\r?\n\r?\n/);
+
+        // 保留最后一段（可能未完整）
+        buffer = events.pop() || "";
+
+        for (const event of events) {
+          const lines = event
+            .split(/\r?\n/)
+            .map((l) => l.trim())
+            .filter(Boolean);
+
+          for (const line of lines) {
+            // 只处理 data 行
+            if (line.startsWith("data:")) {
+              const jsonStr = line.substring(5).trim();
+              if (jsonStr === "Streaming completed") {
+                onComplete?.();
+                break;
+              }
+              try {
+                const data = JSON.parse(jsonStr);
+                if (data.content) {
+                  onChunk?.(JSON.stringify(data));
+                }
+              } catch (e) {
+                console.error("Failed to parse SSE data:", e, jsonStr);
+              }
+            }
+          }
+        }
+      }
+    } catch (error) {
+      const errorMsg =
+        error instanceof Error ? error.message : "Stream error occurred";
+      onError?.(errorMsg);
+      throw error;
+    }
   },
 
   /**

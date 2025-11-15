@@ -38,6 +38,7 @@ export const useMessages = (conversationId: string | null | undefined) => {
 
   return {
     messages,
+    setMessages,
     loading,
     error,
     fetchMessages,

@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * AI Conversation Controller
@@ -76,11 +77,12 @@ public class AiConversationController {
     @Operation(summary = "流式聊天", description = "发送消息并以流式方式接收AI响应")
     @PostMapping("/chat-stream")
     public SseEmitter chatStream(@RequestBody ChatRequest request) {
-        SseEmitter emitter = new SseEmitter(300000L); // 5 minutes timeout
+
+        SseEmitter emitter = new SseEmitter(300_000L); // 5 minutes timeout
 
         try {
             // Validate request
-            if (request == null || request.getMessage() == null || request.getMessage().isEmpty()) {
+            if (request.getMessage() == null || request.getMessage().isEmpty()) {
                 emitter.send(SseEmitter.event().name("error").data("Message is required"));
                 emitter.complete();
                 return emitter;
@@ -99,27 +101,41 @@ public class AiConversationController {
 
             log.info("Stream chat request received. conversationId={}, userId={}", request.getConversationId(), request.getUserId());
 
-            // Process stream chat in a separate thread
-            new Thread(() -> {
+            // Use final variable for lambda
+            final ChatRequest requestForThread = request;
+
+            // Use CompletableFuture instead of new Thread
+            CompletableFuture.runAsync(() -> {
                 try {
-                    aiConversationService.chatStream(request, emitter);
+                    aiConversationService.chatStream(requestForThread, emitter);
                 } catch (Exception e) {
-                    log.error("Stream chat failed. error={}", e.getMessage(), e);
+                    log.error("Stream chat failed", e);
                     try {
                         emitter.send(SseEmitter.event().name("error").data("Stream chat failed: " + e.getMessage()));
                     } catch (Exception ex) {
                         log.error("Error sending error event", ex);
+                    } finally {
+                        emitter.complete();
                     }
                 }
-            }).start();
+            });
+
+            // Optional: timeout handling
+            emitter.onTimeout(() -> {
+                log.warn("SSE emitter timeout for conversationId={}", request.getConversationId());
+                emitter.complete();
+            });
+
+            emitter.onCompletion(() -> log.info("SSE emitter completed for conversationId={}", request.getConversationId()));
 
         } catch (Exception e) {
-            log.error("Stream chat setup failed. error={}", e.getMessage(), e);
+            log.error("Stream chat setup failed", e);
             try {
                 emitter.send(SseEmitter.event().name("error").data("Stream setup failed: " + e.getMessage()));
-                emitter.complete();
             } catch (Exception ex) {
                 log.error("Error sending error event", ex);
+            } finally {
+                emitter.complete();
             }
         }
 

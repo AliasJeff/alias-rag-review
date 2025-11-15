@@ -1,7 +1,6 @@
 import { useState, useCallback, useRef } from "react";
 import { ChatRequest, ChatResponse, Message } from "@/types";
 import { chatApi } from "@/services/modules/chat";
-import { messageApi } from "@/services/modules/message";
 
 export interface UseChatOptions {
   conversationId?: string;

@@ -1,6 +1,5 @@
-import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from "axios";
-
-const isDev = process.env.NODE_ENV === "development";
+import axios, { AxiosInstance } from "axios";
+import { showError } from "./notificationService";
 
 /**
  * 创建 HTTP 客户端实例
@@ -17,21 +16,47 @@ export function createHttpClient(): AxiosInstance {
     (config) => {
       return config;
     },
-    (error) => Promise.reject(error)
+    (error) => {
+      const message = error?.message || "Request failed";
+      showError(message);
+      return Promise.reject(error);
+    }
   );
 
   client.interceptors.response.use(
     (response) => {
       const { data } = response;
       if (data?.code !== "0000") {
-        throw new Error(data?.message || data?.info);
+        showError(data?.message || data?.info || "Request failed");
+        return Promise.reject(
+          new Error(data?.message || data?.info || "Request failed")
+        );
       }
       return response;
     },
-    (error) => Promise.reject(error)
+    (error) => {
+      const message =
+        error?.response?.data?.message || error?.message || "An error occurred";
+      showError(message);
+      return Promise.reject(error);
+    }
   );
 
   return client;
 }
 
-export const httpClient = createHttpClient();
+let httpClientInstance: AxiosInstance | null = null;
+
+export function getHttpClient(): AxiosInstance {
+  if (!httpClientInstance) {
+    httpClientInstance = createHttpClient();
+  }
+  return httpClientInstance;
+}
+
+// For backward compatibility
+export const httpClient = new Proxy({} as AxiosInstance, {
+  get: (target, prop) => {
+    return getHttpClient()[prop as keyof AxiosInstance];
+  },
+});

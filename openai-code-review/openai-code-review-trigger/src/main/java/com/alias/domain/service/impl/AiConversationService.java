@@ -1,10 +1,9 @@
 package com.alias.domain.service.impl;
 
-import com.alias.domain.model.ChatContext;
-import com.alias.domain.model.ChatMessage;
-import com.alias.domain.model.ChatRequest;
+import com.alias.domain.model.*;
 import com.alias.domain.service.IAiConversationService;
 import com.alias.infrastructure.openai.dto.ChatCompletionRequestDTO;
+import jakarta.annotation.Resource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
@@ -32,6 +31,12 @@ public class AiConversationService implements IAiConversationService {
     private static final Logger logger = LoggerFactory.getLogger(AiConversationService.class);
 
     private final ChatClient chatClient;
+
+    @Resource
+    private MessageService messageService;
+
+    @Resource
+    private ConversationService conversationService;
 
     /**
      * In-memory context storage (replace with database in production)
@@ -77,6 +82,33 @@ public class AiConversationService implements IAiConversationService {
         // Save context
         saveContext(context);
 
+        // Save messages to database
+        try {
+            UUID conversationId = UUID.fromString(context.getConversationId());
+
+            // Save user message to database
+            Message userMsg = Message.builder().conversationId(conversationId).role("user").type("text").content(request.getMessage()).build();
+            messageService.createMessage(userMsg);
+            logger.debug("User message saved to database. conversationId={}", conversationId);
+
+            // Save assistant message to database
+            Message assistantMsg = Message.builder().conversationId(conversationId).role("assistant").type("text").content(assistantContent).build();
+            messageService.createMessage(assistantMsg);
+            logger.debug("Assistant message saved to database. conversationId={}", conversationId);
+
+            // Update conversation status if needed
+            Conversation conversation = conversationService.getConversationById(conversationId);
+            if (conversation != null && "error".equals(conversation.getStatus())) {
+                conversation.setStatus("active");
+                conversationService.updateConversation(conversation);
+                logger.debug("Conversation status updated to active. conversationId={}", conversationId);
+            }
+
+        } catch (Exception e) {
+            logger.error("Failed to save messages to database. conversationId={}, error={}", context.getConversationId(), e.getMessage(), e);
+            // Don't throw exception, just log it to avoid breaking the chat flow
+        }
+
         logger.info("Chat completed. conversationId={}, responseLength={}", context.getConversationId(), assistantContent.length());
 
         return response;
@@ -120,6 +152,33 @@ public class AiConversationService implements IAiConversationService {
 
             // Save context
             saveContext(context);
+
+            // Save messages to database
+            try {
+                UUID conversationId = UUID.fromString(context.getConversationId());
+
+                // Save user message to database
+                Message userMsg = Message.builder().conversationId(conversationId).role("user").type("text").content(request.getMessage()).build();
+                messageService.createMessage(userMsg);
+                logger.debug("User message saved to database. conversationId={}", conversationId);
+
+                // Save assistant message to database
+                Message assistantMsg = Message.builder().conversationId(conversationId).role("assistant").type("text").content(fullResponse.toString()).build();
+                messageService.createMessage(assistantMsg);
+                logger.debug("Assistant message saved to database. conversationId={}", conversationId);
+
+                // Update conversation status if needed
+                Conversation conversation = conversationService.getConversationById(conversationId);
+                if (conversation != null && "error".equals(conversation.getStatus())) {
+                    conversation.setStatus("active");
+                    conversationService.updateConversation(conversation);
+                    logger.debug("Conversation status updated to active. conversationId={}", conversationId);
+                }
+
+            } catch (Exception e) {
+                logger.error("Failed to save messages to database. conversationId={}, error={}", context.getConversationId(), e.getMessage(), e);
+                // Don't throw exception, just log it to avoid breaking the stream
+            }
 
             // Send completion event
             emitter.send(SseEmitter.event().id(context.getConversationId()).name("complete").data("Streaming completed"));

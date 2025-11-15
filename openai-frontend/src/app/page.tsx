@@ -2,6 +2,11 @@
 
 import { useState } from "react";
 import { ChatArea, Sidebar } from "@/components";
+import {
+  ErrorBoundary,
+  SidebarErrorBoundary,
+  ChatAreaErrorBoundary,
+} from "@/components/ErrorBoundary";
 import { useConversations, useMessages, useClientUser } from "@/hooks";
 import styles from "./page.module.css";
 
@@ -121,24 +126,30 @@ export default function Home() {
   }
 
   return (
-    <div className={styles.container}>
-      <Sidebar
-        conversations={conversations}
-        activeConversationId={activeConversationId}
-        onSelectConversation={setActiveConversationId}
-        onCreateConversation={handleCreateConversation}
-        onDeleteConversation={handleDeleteConversation}
-        onUpdateConversation={handleUpdateConversation}
-        onUpdateConversationStatus={handleUpdateConversationStatus}
-        loading={conversationsLoading}
-        clientUser={clientUser}
-      />
-      <ChatArea
-        messages={messages}
-        onSendMessage={handleSendMessage}
-        loading={messagesLoading}
-        disabled={!activeConversationId}
-      />
-    </div>
+    <ErrorBoundary boundary="Home">
+      <div className={styles.container}>
+        <SidebarErrorBoundary>
+          <Sidebar
+            conversations={conversations}
+            activeConversationId={activeConversationId}
+            onSelectConversation={setActiveConversationId}
+            onCreateConversation={handleCreateConversation}
+            onDeleteConversation={handleDeleteConversation}
+            onUpdateConversation={handleUpdateConversation}
+            onUpdateConversationStatus={handleUpdateConversationStatus}
+            loading={conversationsLoading}
+            clientUser={clientUser}
+          />
+        </SidebarErrorBoundary>
+        <ChatAreaErrorBoundary>
+          <ChatArea
+            messages={messages}
+            onSendMessage={handleSendMessage}
+            loading={messagesLoading}
+            disabled={!activeConversationId}
+          />
+        </ChatAreaErrorBoundary>
+      </div>
+    </ErrorBoundary>
   );
 }

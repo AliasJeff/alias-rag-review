@@ -9,7 +9,7 @@ import styles from "./Sidebar.module.css";
 
 interface SidebarProps {
   conversations: Conversation[];
-  activeConversationId: string | null;
+  activeConversationId: string | null | undefined;
   onSelectConversation: (id: string) => void;
   onCreateConversation: () => void;
   onDeleteConversation: (id: string) => void;

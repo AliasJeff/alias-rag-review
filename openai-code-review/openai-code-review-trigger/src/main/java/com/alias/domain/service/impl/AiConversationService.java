@@ -1,15 +1,13 @@
 package com.alias.domain.service.impl;
 
-import com.alias.domain.model.ChatContext;
-import com.alias.domain.model.ChatMessage;
-import com.alias.domain.model.ChatRequest;
+import com.alias.domain.model.*;
 import com.alias.domain.service.IAiConversationService;
 import com.alias.infrastructure.openai.dto.ChatCompletionRequestDTO;
+import jakarta.annotation.Resource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.UserMessage;
-import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.stereotype.Service;
@@ -19,8 +17,8 @@ import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Random;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * AI Conversation Service Implementation
@@ -33,10 +31,11 @@ public class AiConversationService implements IAiConversationService {
 
     private final ChatClient chatClient;
 
-    /**
-     * In-memory context storage (replace with database in production)
-     */
-    private final ConcurrentHashMap<String, ChatContext> contextStore = new ConcurrentHashMap<>();
+    @Resource
+    private MessageService messageService;
+
+    @Resource
+    private ConversationService conversationService;
 
     public AiConversationService(ChatClient chatClient) {
         this.chatClient = chatClient;
@@ -65,21 +64,50 @@ public class AiConversationService implements IAiConversationService {
         );
 
         // Call Spring AI ChatClient
-        ChatResponse response = chatClient.prompt(prompt).call().chatResponse();
+        org.springframework.ai.chat.model.ChatResponse springResponse = chatClient.prompt(prompt).call().chatResponse();
 
         // Extract response content
-        String assistantContent = response.getResult().getOutput().getText();
+        String assistantContent = springResponse.getResult().getOutput().getText();
+        String messageId = UUID.randomUUID().toString();
 
         // Add assistant message to context
-        ChatMessage assistantMessage = ChatMessage.builder().id(UUID.randomUUID().toString()).role("assistant").content(assistantContent).createdAt(LocalDateTime.now()).build();
+        ChatMessage assistantMessage = ChatMessage.builder().id(messageId).role("assistant").content(assistantContent).createdAt(LocalDateTime.now()).build();
         context.addMessage(assistantMessage);
 
         // Save context
         saveContext(context);
 
+        // Save messages to database
+        try {
+            UUID conversationId = UUID.fromString(context.getConversationId());
+
+            // Save user message to database
+            Message userMsg = Message.builder().conversationId(conversationId).role("user").type("text").content(request.getMessage()).build();
+            messageService.createMessage(userMsg);
+            logger.debug("User message saved to database. conversationId={}", conversationId);
+
+            // Save assistant message to database
+            Message assistantMsg = Message.builder().conversationId(conversationId).role("assistant").type("text").content(assistantContent).build();
+            messageService.createMessage(assistantMsg);
+            logger.debug("Assistant message saved to database. conversationId={}", conversationId);
+
+            // Update conversation status if needed
+            Conversation conversation = conversationService.getConversationById(conversationId);
+            if (conversation != null && "error".equals(conversation.getStatus())) {
+                conversation.setStatus("active");
+                conversationService.updateConversation(conversation);
+                logger.debug("Conversation status updated to active. conversationId={}", conversationId);
+            }
+
+        } catch (Exception e) {
+            logger.error("Failed to save messages to database. conversationId={}, error={}", context.getConversationId(), e.getMessage(), e);
+            // Don't throw exception, just log it to avoid breaking the chat flow
+        }
+
         logger.info("Chat completed. conversationId={}, responseLength={}", context.getConversationId(), assistantContent.length());
 
-        return response;
+        // Build and return custom ChatResponse
+        return ChatResponse.builder().content(assistantContent).conversationId(context.getConversationId()).messageId(messageId).messageCount(context.getMessageCount()).model(context.getModel()).timestamp(LocalDateTime.now()).status("success").build();
     }
 
     @Override
@@ -107,12 +135,13 @@ public class AiConversationService implements IAiConversationService {
             chatRequest.setModel(request.getModel() != null ? request.getModel() : context.getModel());
             chatRequest.setMessages(messages);
 
-            // Send initial message
-            emitter.send(SseEmitter.event().id(context.getConversationId()).name("start").data("Streaming started"));
+            // Send initial message with conversation ID
+            String initData = "{\"conversationId\":\"" + context.getConversationId() + "\"}";
+            emitter.send(SseEmitter.event().id(context.getConversationId()).name("start").data(initData));
 
             // Call OpenAI API with streaming
             StringBuilder fullResponse = new StringBuilder();
-            streamChatCompletion(chatRequest, emitter, fullResponse);
+            streamChatCompletion(chatRequest, emitter, context.getConversationId(), context, fullResponse);
 
             // Add assistant message to context
             ChatMessage assistantMessage = ChatMessage.builder().id(UUID.randomUUID().toString()).role("assistant").content(fullResponse.toString()).createdAt(LocalDateTime.now()).build();
@@ -120,6 +149,33 @@ public class AiConversationService implements IAiConversationService {
 
             // Save context
             saveContext(context);
+
+            // Save messages to database
+            try {
+                UUID conversationId = UUID.fromString(context.getConversationId());
+
+                // Save user message to database
+                Message userMsg = Message.builder().conversationId(conversationId).role("user").type("text").content(request.getMessage()).build();
+                messageService.createMessage(userMsg);
+                logger.debug("User message saved to database. conversationId={}", conversationId);
+
+                // Save assistant message to database
+                Message assistantMsg = Message.builder().conversationId(conversationId).role("assistant").type("text").content(fullResponse.toString()).build();
+                messageService.createMessage(assistantMsg);
+                logger.debug("Assistant message saved to database. conversationId={}", conversationId);
+
+                // Update conversation status if needed
+                Conversation conversation = conversationService.getConversationById(conversationId);
+                if (conversation != null && "error".equals(conversation.getStatus())) {
+                    conversation.setStatus("active");
+                    conversationService.updateConversation(conversation);
+                    logger.debug("Conversation status updated to active. conversationId={}", conversationId);
+                }
+
+            } catch (Exception e) {
+                logger.error("Failed to save messages to database. conversationId={}, error={}", context.getConversationId(), e.getMessage(), e);
+                // Don't throw exception, just log it to avoid breaking the stream
+            }
 
             // Send completion event
             emitter.send(SseEmitter.event().id(context.getConversationId()).name("complete").data("Streaming completed"));
@@ -147,50 +203,110 @@ public class AiConversationService implements IAiConversationService {
 
     @Override
     public ChatContext getOrCreateContext(String conversationId, String userId) {
-        if (conversationId != null && contextStore.containsKey(conversationId)) {
-            return contextStore.get(conversationId);
+        String effectiveConversationId = conversationId != null ? conversationId : UUID.randomUUID().toString();
+
+        ChatContext.ChatContextBuilder builder = ChatContext.builder().conversationId(effectiveConversationId).userId(userId).model("gpt-4o").temperature(0.7).maxTokens(2000).totalTokens(0);
+
+        List<ChatMessage> chatMessages = new ArrayList<>();
+
+        try {
+            UUID conversationUuid = UUID.fromString(effectiveConversationId);
+
+            // Load conversation metadata
+            Conversation conversation = conversationService.getConversationById(conversationUuid);
+            if (conversation != null) {
+                builder.title(conversation.getTitle());
+                builder.createdAt(conversation.getCreatedAt());
+                builder.updatedAt(conversation.getUpdatedAt());
+            } else {
+                builder.title("Conversation " + effectiveConversationId.substring(0, 8));
+                builder.createdAt(LocalDateTime.now());
+                builder.updatedAt(LocalDateTime.now());
+            }
+
+            // Load existing messages as context
+            List<Message> dbMessages = messageService.getMessagesByConversationId(conversationUuid);
+            for (Message m : dbMessages) {
+                ChatMessage chatMessage = ChatMessage.builder().id(m.getId() != null ? m.getId().toString() : null).conversationId(effectiveConversationId).role(m.getRole()).content(m.getContent()).createdAt(m.getCreatedAt()).build();
+                chatMessages.add(chatMessage);
+            }
+
+            builder.messages(chatMessages);
+
+            logger.info("Loaded context from database. conversationId={}, userId={}, messageCount={}", effectiveConversationId, userId, chatMessages.size());
+
+        } catch (IllegalArgumentException e) {
+            // Invalid UUID or no database records, fall back to a new in-memory context
+            builder.title("Conversation " + effectiveConversationId.substring(0, 8));
+            builder.createdAt(LocalDateTime.now());
+            builder.updatedAt(LocalDateTime.now());
+            builder.messages(new ArrayList<>());
+            logger.warn("Invalid conversationId format, creating new context in memory. conversationId={}, userId={}", effectiveConversationId, userId);
+        } catch (Exception e) {
+            // Any database error should not break chat flow
+            builder.title("Conversation " + effectiveConversationId.substring(0, 8));
+            builder.createdAt(LocalDateTime.now());
+            builder.updatedAt(LocalDateTime.now());
+            builder.messages(new ArrayList<>());
+            logger.error("Failed to load context from database. conversationId={}, error={}", effectiveConversationId, e.getMessage(), e);
         }
 
-        String newConversationId = conversationId != null ? conversationId : UUID.randomUUID().toString();
-        ChatContext context = ChatContext.builder().conversationId(newConversationId).userId(userId).title("Conversation " + newConversationId.substring(0, 8)).model("gpt-4o").temperature(0.7).maxTokens(2000).totalTokens(0).createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
-
-        contextStore.put(newConversationId, context);
-        logger.info("Created new context. conversationId={}, userId={}", newConversationId, userId);
-
-        return context;
+        return builder.build();
     }
 
     @Override
     public ChatContext getContext(String conversationId) {
-        return contextStore.get(conversationId);
+        if (conversationId == null) {
+            return null;
+        }
+        return getOrCreateContext(conversationId, null);
     }
 
     @Override
     public void saveContext(ChatContext context) {
-        context.setUpdatedAt(LocalDateTime.now());
-        contextStore.put(context.getConversationId(), context);
-        logger.debug("Context saved. conversationId={}, messageCount={}", context.getConversationId(), context.getMessageCount());
+        // Context is now derived from database messages and conversation metadata.
+        // Saving is handled by MessageService and ConversationService, so this is a no-op
+        // kept for interface compatibility and logging.
+        if (context != null) {
+            context.setUpdatedAt(LocalDateTime.now());
+            logger.debug("Context save requested (no-op). conversationId={}, messageCount={}", context.getConversationId(), context.getMessageCount());
+        }
     }
 
     @Override
     public void clearConversation(String conversationId) {
-        ChatContext context = contextStore.get(conversationId);
-        if (context != null) {
-            context.clearMessages();
-            saveContext(context);
-            logger.info("Conversation cleared. conversationId={}", conversationId);
+        if (conversationId == null) {
+            return;
+        }
+
+        try {
+            UUID conversationUuid = UUID.fromString(conversationId);
+            messageService.deleteMessagesByConversationId(conversationUuid);
+            logger.info("Conversation messages cleared in database. conversationId={}", conversationId);
+        } catch (Exception e) {
+            logger.error("Failed to clear conversation messages. conversationId={}, error={}", conversationId, e.getMessage(), e);
         }
     }
 
     @Override
     public void deleteConversation(String conversationId) {
-        contextStore.remove(conversationId);
-        logger.info("Conversation deleted. conversationId={}", conversationId);
+        if (conversationId == null) {
+            return;
+        }
+
+        try {
+            UUID conversationUuid = UUID.fromString(conversationId);
+            messageService.deleteMessagesByConversationId(conversationUuid);
+            conversationService.deleteConversation(conversationUuid);
+            logger.info("Conversation and messages deleted from database. conversationId={}", conversationId);
+        } catch (Exception e) {
+            logger.error("Failed to delete conversation. conversationId={}, error={}", conversationId, e.getMessage(), e);
+        }
     }
 
     @Override
     public ChatContext getConversationHistory(String conversationId) {
-        return contextStore.get(conversationId);
+        return getContext(conversationId);
     }
 
     /**
@@ -217,35 +333,134 @@ public class AiConversationService implements IAiConversationService {
 
     /**
      * Stream chat completion using Spring AI ChatClient
+     * Sends 2-6 words/characters at a time to simulate natural streaming
      */
-    private void streamChatCompletion(ChatCompletionRequestDTO chatRequest, SseEmitter emitter, StringBuilder fullResponse) throws IOException {
+    private void streamChatCompletion(ChatCompletionRequestDTO chatRequest, SseEmitter emitter, String conversationId, ChatContext context, StringBuilder fullResponse) throws IOException {
         try {
-            // Extract user message
-            String userMessage = chatRequest.getMessages().stream().filter(msg -> "user".equals(msg.getRole())).map(ChatCompletionRequestDTO.Prompt::getContent).findFirst().orElse("");
+            // 取最新用户消息（messages 列表最后一条 role=user 的消息）
+            String userMessage = chatRequest.getMessages().stream().filter(msg -> "user".equals(msg.getRole())).reduce((first, second) -> second) // 取最后一个
+                    .map(ChatCompletionRequestDTO.Prompt::getContent).orElse("");
 
-            // Build prompt
-            Prompt prompt = new Prompt(
-                    new UserMessage(userMessage), OpenAiChatOptions.builder().model(chatRequest.getModel()).build()
-            );
+            // 将最新用户消息加入上下文
+            ChatMessage userChatMessage = ChatMessage.builder().id(UUID.randomUUID().toString()).role("user").content(userMessage).createdAt(LocalDateTime.now()).build();
+            context.addMessage(userChatMessage);
 
-            // Call chat client and stream response
-            ChatResponse response = chatClient.prompt(prompt).call().chatResponse();
-            String content = response.getResult().getOutput().getText();
-
-            // Send content in chunks (simulate streaming)
-            String[] words = content.split("\\s+");
-            for (String word : words) {
-                fullResponse.append(word).append(" ");
-                emitter.send(SseEmitter.event().id(UUID.randomUUID().toString()).name("message").data(word + " "));
-
-                // Small delay to simulate streaming
-                Thread.sleep(10);
+            // 构建上下文内容字符串
+            StringBuilder contextText = new StringBuilder();
+            if (context.getSystemPrompt() != null) {
+                contextText.append("System: ").append(context.getSystemPrompt()).append("\n");
             }
+
+            for (ChatMessage msg : context.getMessages()) {
+                if ("user".equals(msg.getRole())) {
+                    contextText.append("User: ").append(msg.getContent()).append("\n");
+                } else if ("assistant".equals(msg.getRole())) {
+                    contextText.append("Assistant: ").append(msg.getContent()).append("\n");
+                }
+            }
+
+            // 追加最新用户消息
+            contextText.append("User: ").append(userMessage).append("\n");
+
+            // 创建单个 Prompt
+            Prompt prompt = new Prompt(new UserMessage(contextText.toString()), OpenAiChatOptions.builder().model(chatRequest.getModel()).build());
+
+            // 调用 chatClient
+            String content = chatClient.prompt(prompt).call().chatResponse().getResult().getOutput().getText();
+
+            // 按 token 拆分（保留中英文空格/换行）
+            List<String> tokens = tokenizeContent(content);
+            Random random = new Random();
+            int i = 0;
+            while (i < tokens.size()) {
+                int chunkSize = random.nextInt(5) + 2;
+                int endIndex = Math.min(i + chunkSize, tokens.size());
+
+                StringBuilder chunk = new StringBuilder();
+                for (int j = i; j < endIndex; j++) {
+                    chunk.append(tokens.get(j));
+                }
+
+                String chunkContent = chunk.toString();
+                fullResponse.append(chunkContent);
+
+                // SSE 发送当前块
+                String jsonData = "{\"content\":\"" + escapeJson(chunkContent) + "\",\"conversationId\":\"" + conversationId + "\"}";
+                emitter.send(SseEmitter.event().id(UUID.randomUUID().toString()).name("message").data(jsonData));
+
+                Thread.sleep(50);
+                i = endIndex;
+            }
+
+            // 将 AI 回复加入上下文
+            ChatMessage assistantMessage = ChatMessage.builder().id(UUID.randomUUID().toString()).role("assistant").content(fullResponse.toString()).createdAt(LocalDateTime.now()).build();
+            context.addMessage(assistantMessage);
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             logger.error("Streaming interrupted", e);
             throw new IOException("Streaming interrupted", e);
         }
+    }
+
+    /**
+     * Tokenize content into words (for English) or characters (for Chinese)
+     * Mixed content is handled by splitting on spaces and treating Chinese characters individually
+     */
+    private List<String> tokenizeContent(String content) {
+        List<String> tokens = new ArrayList<>();
+
+        if (content == null || content.isEmpty()) {
+            return tokens;
+        }
+
+        // Split by spaces first to separate words
+        String[] parts = content.split("(?<=\\s)|(?=\\s)");
+
+        for (String part : parts) {
+            if (part.isEmpty()) {
+                continue;
+            }
+
+            // Check if part contains Chinese characters
+            if (containsChineseCharacters(part)) {
+                // Split Chinese text into individual characters
+                for (char c : part.toCharArray()) {
+                    tokens.add(String.valueOf(c));
+                }
+            } else {
+                // Keep English words as is
+                tokens.add(part);
+            }
+        }
+
+        return tokens;
+    }
+
+    /**
+     * Check if string contains Chinese characters
+     */
+    private boolean containsChineseCharacters(String str) {
+        if (str == null || str.isEmpty()) {
+            return false;
+        }
+
+        for (char c : str.toCharArray()) {
+            // Unicode range for CJK Unified Ideographs
+            if ((c >= 0x4E00 && c <= 0x9FFF) || (c >= 0x3400 && c <= 0x4DBF) || (c >= 0x20000 && c <= 0x2A6DF) || (c >= 0x2A700 && c <= 0x2B73F) || (c >= 0x2B740 && c <= 0x2B81F) || (c >= 0x2B820 && c <= 0x2CEAF) || (c >= 0xF900 && c <= 0xFAFF) || (c >= 0x2F800 && c <= 0x2FA1F)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Escape JSON string
+     */
+    private String escapeJson(String input) {
+        if (input == null) {
+            return "";
+        }
+        return input.replace("\\", "\\\\").replace("\"", "\\\"").replace("\b", "\\b").replace("\f", "\\f").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t");
     }
 }

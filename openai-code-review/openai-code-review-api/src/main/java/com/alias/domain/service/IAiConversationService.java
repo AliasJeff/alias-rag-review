@@ -2,7 +2,7 @@ package com.alias.domain.service;
 
 import com.alias.domain.model.ChatContext;
 import com.alias.domain.model.ChatRequest;
-import org.springframework.ai.chat.model.ChatResponse;
+import com.alias.domain.model.ChatResponse;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 /**

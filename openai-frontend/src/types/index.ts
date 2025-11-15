@@ -35,7 +35,7 @@ export interface Message {
 // API 响应类型
 export interface ApiResponse<T> {
   code: number;
-  message: string;
+  info: string;
   data: T;
 }
 
@@ -53,4 +53,33 @@ export interface Config {
   model?: string;
   temperature?: number;
   maxTokens?: number;
+}
+
+// Chat 请求类型
+export interface ChatRequest {
+  message: string;
+  userId: string;
+  conversationId?: string;
+  systemPrompt?: string;
+}
+
+// Chat 响应类型
+export interface ChatResponse {
+  content: string;
+  conversationId: string;
+  messageId?: string;
+  messageCount?: number;
+  tokensUsed?: number;
+  totalTokens?: number;
+  model?: string;
+  timestamp?: string;
+  status?: string;
+  errorMessage?: string;
+}
+
+// Chat 上下文类型
+export interface ChatContext {
+  conversationId: string;
+  messages: Message[];
+  messageCount: number;
 }

@@ -1,22 +1,20 @@
 import { useState, useEffect, useCallback } from "react";
 import { Conversation } from "@/types";
 import { conversationApi } from "@/services/api";
-import { useClientUser } from "./useClientUser";
 
-export const useConversations = () => {
+export const useConversations = (clientIdentifier?: string) => {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { clientUser } = useClientUser();
 
   const fetchConversations = useCallback(async () => {
-    if (!clientUser?.clientIdentifier) return;
+    if (!clientIdentifier) return;
 
     setLoading(true);
     setError(null);
     try {
       const data = await conversationApi.getClientConversations(
-        clientUser.clientIdentifier
+        clientIdentifier
       );
       setConversations(data);
     } catch (err) {
@@ -26,17 +24,17 @@ export const useConversations = () => {
     } finally {
       setLoading(false);
     }
-  }, [clientUser?.clientIdentifier]);
+  }, [clientIdentifier]);
 
   const createConversation = useCallback(
     async (title?: string, prUrl?: string) => {
-      if (!clientUser?.clientIdentifier) {
+      if (!clientIdentifier) {
         throw new Error("Client identifier not available");
       }
 
       try {
         const newConversation = await conversationApi.createConversation({
-          clientIdentifier: clientUser.clientIdentifier,
+          clientIdentifier,
           title: title || "新对话",
           prUrl,
         });
@@ -49,7 +47,7 @@ export const useConversations = () => {
         throw err;
       }
     },
-    [clientUser?.clientIdentifier]
+    [clientIdentifier]
   );
 
   const updateConversation = useCallback(

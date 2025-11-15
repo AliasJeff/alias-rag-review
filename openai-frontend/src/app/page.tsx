@@ -2,13 +2,18 @@
 
 import { useState } from "react";
 import { ChatArea, Sidebar } from "@/components";
-import { useConversations, useMessages, useClientUser } from "@/hooks";
+import {
+  ErrorBoundary,
+  SidebarErrorBoundary,
+  ChatAreaErrorBoundary,
+} from "@/components/ErrorBoundary";
+import { useConversations, useClientUser, useChat } from "@/hooks";
 import styles from "./page.module.css";
 
 export default function Home() {
   const [activeConversationId, setActiveConversationId] = useState<
-    string | null
-  >(null);
+    string | undefined
+  >(undefined);
   const {
     clientUser,
     loading: clientUserLoading,
@@ -22,12 +27,20 @@ export default function Home() {
     updateConversation,
     updateConversationStatus,
     deleteConversation,
-  } = useConversations();
+  } = useConversations(clientUser?.clientIdentifier);
+
   const {
     messages,
     loading: messagesLoading,
-    sendMessage,
-  } = useMessages(activeConversationId);
+    chatStream,
+    streaming,
+    error: chatError,
+    stopStream,
+    clearContext,
+  } = useChat({
+    conversationId: activeConversationId,
+    userId: clientUser?.clientIdentifier,
+  });
 
   const handleCreateConversation = async () => {
     try {
@@ -61,20 +74,20 @@ export default function Home() {
     try {
       await deleteConversation(id);
       if (activeConversationId === id) {
-        setActiveConversationId(null);
+        setActiveConversationId(undefined);
       }
     } catch (err) {
       console.error("Failed to delete conversation:", err);
     }
   };
 
-  const handleSendMessage = async (content: string) => {
+  const handleChat = async (content: string) => {
     if (!activeConversationId) {
       console.warn("No conversation selected");
       return;
     }
     try {
-      await sendMessage(content);
+      await chatStream(content);
     } catch (err) {
       console.error("Failed to send message:", err);
     }
@@ -121,24 +134,34 @@ export default function Home() {
   }
 
   return (
-    <div className={styles.container}>
-      <Sidebar
-        conversations={conversations}
-        activeConversationId={activeConversationId}
-        onSelectConversation={setActiveConversationId}
-        onCreateConversation={handleCreateConversation}
-        onDeleteConversation={handleDeleteConversation}
-        onUpdateConversation={handleUpdateConversation}
-        onUpdateConversationStatus={handleUpdateConversationStatus}
-        loading={conversationsLoading}
-        clientUser={clientUser}
-      />
-      <ChatArea
-        messages={messages}
-        onSendMessage={handleSendMessage}
-        loading={messagesLoading}
-        disabled={!activeConversationId}
-      />
-    </div>
+    <ErrorBoundary boundary="Home">
+      <div className={styles.container}>
+        <SidebarErrorBoundary>
+          <Sidebar
+            conversations={conversations}
+            activeConversationId={activeConversationId}
+            onSelectConversation={setActiveConversationId}
+            onCreateConversation={handleCreateConversation}
+            onDeleteConversation={handleDeleteConversation}
+            onUpdateConversation={handleUpdateConversation}
+            onUpdateConversationStatus={handleUpdateConversationStatus}
+            loading={conversationsLoading}
+            clientUser={clientUser}
+          />
+        </SidebarErrorBoundary>
+        <ChatAreaErrorBoundary>
+          <ChatArea
+            messages={messages}
+            onSendMessage={handleChat}
+            loading={messagesLoading}
+            disabled={!activeConversationId}
+            streaming={streaming}
+            error={chatError}
+            onStopStream={stopStream}
+            onClearContext={clearContext}
+          />
+        </ChatAreaErrorBoundary>
+      </div>
+    </ErrorBoundary>
   );
 }

@@ -2,18 +2,18 @@ package com.alias.domain.controller;
 
 import com.alias.domain.model.ChatContext;
 import com.alias.domain.model.ChatRequest;
+import com.alias.domain.model.ChatResponse;
 import com.alias.domain.model.Response;
 import com.alias.domain.service.IAiConversationService;
-import com.alias.domain.service.impl.AiConversationService;
-import org.springframework.ai.chat.model.ChatResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * AI Conversation Controller
@@ -26,8 +26,8 @@ import java.util.UUID;
 @RequestMapping("/api/v1/ai-chat")
 public class AiConversationController {
 
-    @Autowired
-    private IAiConversationService conversationService;
+    @Resource
+    private IAiConversationService aiConversationService;
 
     /**
      * Send a chat message and get response
@@ -56,7 +56,7 @@ public class AiConversationController {
             log.info("Chat request received. conversationId={}, userId={}, messageLength={}", request.getConversationId(), request.getUserId(), request.getMessage().length());
 
             // Process chat
-            ChatResponse response = conversationService.chat(request);
+            ChatResponse response = aiConversationService.chat(request);
 
             log.info("Chat completed successfully. conversationId={}", request.getConversationId());
 
@@ -77,11 +77,12 @@ public class AiConversationController {
     @Operation(summary = "流式聊天", description = "发送消息并以流式方式接收AI响应")
     @PostMapping("/chat-stream")
     public SseEmitter chatStream(@RequestBody ChatRequest request) {
-        SseEmitter emitter = new SseEmitter(300000L); // 5 minutes timeout
+
+        SseEmitter emitter = new SseEmitter(300_000L); // 5 minutes timeout
 
         try {
             // Validate request
-            if (request == null || request.getMessage() == null || request.getMessage().isEmpty()) {
+            if (request.getMessage() == null || request.getMessage().isEmpty()) {
                 emitter.send(SseEmitter.event().name("error").data("Message is required"));
                 emitter.complete();
                 return emitter;
@@ -100,27 +101,41 @@ public class AiConversationController {
 
             log.info("Stream chat request received. conversationId={}, userId={}", request.getConversationId(), request.getUserId());
 
-            // Process stream chat in a separate thread
-            new Thread(() -> {
+            // Use final variable for lambda
+            final ChatRequest requestForThread = request;
+
+            // Use CompletableFuture instead of new Thread
+            CompletableFuture.runAsync(() -> {
                 try {
-                    conversationService.chatStream(request, emitter);
+                    aiConversationService.chatStream(requestForThread, emitter);
                 } catch (Exception e) {
-                    log.error("Stream chat failed. error={}", e.getMessage(), e);
+                    log.error("Stream chat failed", e);
                     try {
                         emitter.send(SseEmitter.event().name("error").data("Stream chat failed: " + e.getMessage()));
                     } catch (Exception ex) {
                         log.error("Error sending error event", ex);
+                    } finally {
+                        emitter.complete();
                     }
                 }
-            }).start();
+            });
+
+            // Optional: timeout handling
+            emitter.onTimeout(() -> {
+                log.warn("SSE emitter timeout for conversationId={}", request.getConversationId());
+                emitter.complete();
+            });
+
+            emitter.onCompletion(() -> log.info("SSE emitter completed for conversationId={}", request.getConversationId()));
 
         } catch (Exception e) {
-            log.error("Stream chat setup failed. error={}", e.getMessage(), e);
+            log.error("Stream chat setup failed", e);
             try {
                 emitter.send(SseEmitter.event().name("error").data("Stream setup failed: " + e.getMessage()));
-                emitter.complete();
             } catch (Exception ex) {
                 log.error("Error sending error event", ex);
+            } finally {
+                emitter.complete();
             }
         }
 
@@ -137,7 +152,7 @@ public class AiConversationController {
     @GetMapping("/context/{conversationId}")
     public Response<ChatContext> getContext(@PathVariable("conversationId") String conversationId) {
         try {
-            ChatContext context = conversationService.getConversationHistory(conversationId);
+            ChatContext context = aiConversationService.getConversationHistory(conversationId);
 
             if (context == null) {
                 return Response.<ChatContext>builder().code("4004").info("Conversation not found").build();
@@ -163,7 +178,7 @@ public class AiConversationController {
     @DeleteMapping("/context/{conversationId}/clear")
     public Response<String> clearContext(@PathVariable("conversationId") String conversationId) {
         try {
-            conversationService.clearConversation(conversationId);
+            aiConversationService.clearConversation(conversationId);
 
             log.info("Conversation cleared. conversationId={}", conversationId);
 
@@ -185,7 +200,7 @@ public class AiConversationController {
     @DeleteMapping("/context/{conversationId}")
     public Response<String> deleteContext(@PathVariable("conversationId") String conversationId) {
         try {
-            conversationService.deleteConversation(conversationId);
+            aiConversationService.deleteConversation(conversationId);
 
             log.info("Conversation deleted. conversationId={}", conversationId);
 

@@ -1,4 +1,5 @@
 import "./globals.css";
+import { RootLayoutClient } from "./RootLayoutClient";
 
 export const metadata = {
   title: "AI RAG Code Review",
@@ -12,7 +13,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="zh-CN">
-      <body>{children}</body>
+      <body>
+        <RootLayoutClient>{children}</RootLayoutClient>
+      </body>
     </html>
   );
 }

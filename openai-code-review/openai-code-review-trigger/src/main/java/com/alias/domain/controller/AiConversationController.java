@@ -1,16 +1,18 @@
 package com.alias.domain.controller;
 
-import com.alias.domain.model.ChatContext;
-import com.alias.domain.model.ChatRequest;
-import com.alias.domain.model.ChatResponse;
-import com.alias.domain.model.Response;
+import com.alias.config.AppConfig;
+import com.alias.domain.model.*;
 import com.alias.domain.service.IAiConversationService;
+import com.alias.domain.service.impl.ReviewPullRequestStreamingService;
 import com.alias.domain.utils.ChatUtils;
+import com.alias.infrastructure.git.GitCommand;
+import com.alias.utils.GitHubPrUtils;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -31,6 +33,9 @@ public class AiConversationController {
 
     @Resource
     private IAiConversationService aiConversationService;
+
+    @Resource
+    private ChatClient chatClient;
 
 
     @PostConstruct
@@ -215,17 +220,42 @@ public class AiConversationController {
 
                     // Route based on intent
                     if (intent == ChatUtils.IntentType.CODE_REVIEW || intent == ChatUtils.IntentType.REVIEW_FOLLOWUP) {
-                        // TODO start code review
                         // Check if PR URL exists in conversation
                         String prUrl = null;
+                        // Extract PR URL from user message, and save to conversation if not exists
                         try {
                             java.util.UUID conversationUuid = java.util.UUID.fromString(requestForThread.getConversationId());
-                            com.alias.domain.model.Conversation conversation = aiConversationService.getConversationById(conversationUuid);
+                            Conversation conversation = aiConversationService.getConversationById(conversationUuid);
+
                             if (conversation != null) {
                                 prUrl = conversation.getPrUrl();
                             }
+
+                            // If no PR URL in conversation, try to extract from user message
+                            if ((prUrl == null || prUrl.isEmpty()) && requestForThread.getMessage() != null) {
+                                String extractedPrUrl = extractPrUrlFromMessage(requestForThread.getMessage());
+                                if (extractedPrUrl != null && !extractedPrUrl.isEmpty()) {
+                                    prUrl = extractedPrUrl;
+                                    // Save PR URL to conversation
+                                    if (conversation == null) {
+                                        // Create new conversation if not exists
+                                        conversation = new Conversation();
+                                        conversation.setId(conversationUuid);
+                                        conversation.setClientIdentifier(java.util.UUID.fromString(requestForThread.getUserId()));
+                                        conversation.setTitle("Code Review: " + prUrl);
+                                        conversation.setPrUrl(prUrl);
+                                        conversation.setStatus("active");
+                                        aiConversationService.createConversation(conversation);
+                                        log.info("Created new conversation with PR URL. conversationId={}, prUrl={}", conversationUuid, prUrl);
+                                    } else if (conversation.getPrUrl() == null || conversation.getPrUrl().isEmpty()) {
+                                        conversation.setPrUrl(prUrl);
+                                        aiConversationService.updateConversation(conversation);
+                                        log.info("Updated conversation with PR URL. conversationId={}, prUrl={}", conversationUuid, prUrl);
+                                    }
+                                }
+                            }
                         } catch (Exception e) {
-                            log.warn("Failed to retrieve PR URL from conversation. conversationId={}, error={}", requestForThread.getConversationId(), e.getMessage());
+                            log.warn("Failed to retrieve/update PR URL from conversation. conversationId={}, error={}", requestForThread.getConversationId(), e.getMessage());
                         }
 
                         // If no PR URL found, send message to user
@@ -244,31 +274,72 @@ public class AiConversationController {
                             }
                         }
 
-                        // Get RAG context if repository is provided
-                        String ragContext = "";
-                        if (requestForThread.getSystemPrompt() != null && requestForThread.getSystemPrompt().contains("repository:")) {
-                            // Extract repository from system prompt or use a dedicated field
-                            String repository = extractRepositoryFromRequest(requestForThread);
-                            if (repository != null && !repository.isEmpty()) {
-                                ragContext = ChatUtils.getRagContext(requestForThread.getMessage(), repository);
-                                log.info("Retrieved RAG context. size={}", ragContext.length());
-                            }
-                        }
-
-                        // Enhance system prompt with RAG context if available
-                        if (!ragContext.isEmpty()) {
-                            String enhancedSystemPrompt = buildEnhancedSystemPrompt(requestForThread.getSystemPrompt(), ragContext);
-                            requestForThread.setSystemPrompt(enhancedSystemPrompt);
-                            log.debug("Enhanced system prompt with RAG context");
-                        }
-
-                        // Send RAG context event
-                        if (!ragContext.isEmpty()) {
+                        if (intent == ChatUtils.IntentType.CODE_REVIEW) {
+                            // Start code review
                             try {
-                                String ragEvent = "{\"type\":\"rag_context\",\"size\":" + ragContext.length() + "}";
-                                emitter.send(SseEmitter.event().name("rag_context").data(ragEvent));
-                            } catch (IOException e) {
-                                log.warn("Failed to send RAG context event", e);
+                                log.info("Starting code review for PR. conversationId={}, prUrl={}", requestForThread.getConversationId(), prUrl);
+
+                                // Send review start event
+                                emitter.send(SseEmitter.event().name("review_start").data("{\"prUrl\":\"" + escapeJson(prUrl) + "\"}"));
+
+                                // Get GitHub token from config
+                                String githubToken = AppConfig.getInstance().requireString("github", "token");
+
+                                // Create GitCommand and ReviewPullRequestStreamingService
+                                GitCommand gitCommand = new GitCommand(githubToken);
+                                ReviewPullRequestStreamingService reviewService = new ReviewPullRequestStreamingService(gitCommand, chatClient);
+
+                                // Parse PR URL and set parameters
+                                GitHubPrUtils.PrInfo prInfo = GitHubPrUtils.parsePrUrl(prUrl);
+                                reviewService.setRepository(prInfo.repository);
+                                reviewService.setPrNumber(prInfo.prNumber);
+                                reviewService.setPrUrl(prUrl);
+
+                                // Execute streaming review
+                                reviewService.execStreaming(emitter);
+
+                                log.info("Code review completed. conversationId={}, prUrl={}", requestForThread.getConversationId(), prUrl);
+                            } catch (Exception reviewErr) {
+                                log.error("Code review failed. conversationId={}, prUrl={}, error={}", requestForThread.getConversationId(), prUrl, reviewErr.getMessage(), reviewErr);
+                                try {
+                                    emitter.send(SseEmitter.event().name("error").data("Code review failed: " + reviewErr.getMessage()));
+                                } catch (IOException ioErr) {
+                                    log.error("Failed to send error event", ioErr);
+                                }
+                                emitter.complete();
+                            }
+                            return;
+                        } else {
+                            // Get RAG context from conversation PR URL
+                            String ragContext = "";
+                            try {
+                                // Extract repository from PR URL
+                                GitHubPrUtils.PrInfo prInfo = GitHubPrUtils.parsePrUrl(prUrl);
+                                String repository = prInfo.repository;
+
+                                if (repository != null && !repository.isEmpty()) {
+                                    ragContext = ChatUtils.getRagContext(requestForThread.getMessage(), repository);
+                                    log.info("Retrieved RAG context from PR URL. repository={}, contextSize={}", repository, ragContext.length());
+                                }
+                            } catch (Exception e) {
+                                log.warn("Failed to extract repository from PR URL. prUrl={}, error={}", prUrl, e.getMessage());
+                            }
+
+                            // Enhance system prompt with RAG context if available
+                            if (!ragContext.isEmpty()) {
+                                String enhancedSystemPrompt = buildEnhancedSystemPrompt(requestForThread.getSystemPrompt(), ragContext);
+                                requestForThread.setSystemPrompt(enhancedSystemPrompt);
+                                log.debug("Enhanced system prompt with RAG context");
+                            }
+
+                            // Send RAG context event
+                            if (!ragContext.isEmpty()) {
+                                try {
+                                    String ragEvent = "{\"type\":\"rag_context\",\"size\":" + ragContext.length() + "}";
+                                    emitter.send(SseEmitter.event().name("rag_context").data(ragEvent));
+                                } catch (IOException e) {
+                                    log.warn("Failed to send RAG context event", e);
+                                }
                             }
                         }
                     }
@@ -424,6 +495,34 @@ public class AiConversationController {
             log.error("Failed to delete context. conversationId={}, error={}", conversationId, e.getMessage(), e);
             return Response.<String>builder().code("5000").info("Failed to delete context: " + e.getMessage()).build();
         }
+    }
+
+    /**
+     * Extract PR URL from user message using regex pattern
+     * Supports GitHub PR URLs in format: https://github.com/{owner}/{repo}/pull/{number}
+     *
+     * @param message user message
+     * @return extracted PR URL or null if not found
+     */
+    private String extractPrUrlFromMessage(String message) {
+        if (message == null || message.isEmpty()) {
+            return null;
+        }
+
+        // Regex pattern to match GitHub PR URLs
+        // Matches: https://github.com/{owner}/{repo}/pull/{number}
+        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile(
+                "https://github\\.com/[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+/pull/\\d+"
+        );
+        java.util.regex.Matcher matcher = pattern.matcher(message);
+
+        if (matcher.find()) {
+            String prUrl = matcher.group();
+            log.debug("Extracted PR URL from message: {}", prUrl);
+            return prUrl;
+        }
+
+        return null;
     }
 
     /**

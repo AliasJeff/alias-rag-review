@@ -85,4 +85,20 @@ public interface IAiConversationService {
      * @return conversation object or null if not found
      */
     Conversation getConversationById(UUID conversationId);
+
+    /**
+     * Create a new conversation
+     *
+     * @param conversation conversation object
+     * @return created conversation
+     */
+    Conversation createConversation(Conversation conversation);
+
+    /**
+     * Update an existing conversation
+     *
+     * @param conversation conversation object
+     * @return updated conversation
+     */
+    Conversation updateConversation(Conversation conversation);
 }

@@ -495,4 +495,16 @@ public class AiConversationService implements IAiConversationService {
         }
         return conversationService.getConversationById(conversationId);
     }
+
+    @Override
+    public Conversation createConversation(Conversation conversation) {
+        logger.info("Creating conversation via AI service. conversationId={}", conversation.getId());
+        return conversationService.createConversation(conversation);
+    }
+
+    @Override
+    public Conversation updateConversation(Conversation conversation) {
+        logger.info("Updating conversation via AI service. conversationId={}", conversation.getId());
+        return conversationService.updateConversation(conversation);
+    }
 }

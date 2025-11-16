@@ -2,16 +2,17 @@ package com.alias.test;
 
 import com.alias.domain.model.ChatContext;
 import com.alias.domain.model.ChatRequest;
+import com.alias.domain.model.ChatResponse;
 import com.alias.domain.service.IAiConversationService;
 import com.alias.domain.service.impl.AiConversationService;
 import org.junit.Before;
 import org.junit.Test;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.model.ChatResponse;
 
 import java.util.UUID;
 
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.mockito.Mockito.mock;
 
 /**
@@ -42,9 +43,7 @@ public class AiConversationServiceTest {
 
         // Verify response
         assertNotNull(response);
-        assertNotNull(response.getResult());
-        assertNotNull(response.getResult().getOutput());
-        assertNotNull(response.getResult().getOutput().getText());
+        assertNotNull(response.getContent());
 
         // Verify context was saved
         ChatContext context = conversationService.getContext(request.getConversationId());
@@ -66,7 +65,7 @@ public class AiConversationServiceTest {
 
         // Verify response
         assertNotNull(response);
-        assertNotNull(response.getResult());
+        assertNotNull(response.getContent());
 
         // Verify context has system prompt
         ChatContext context = conversationService.getContext(request.getConversationId());
@@ -84,13 +83,13 @@ public class AiConversationServiceTest {
         ChatRequest request1 = ChatRequest.builder().conversationId(conversationId).userId("user123").message("What is your name?").build();
 
         ChatResponse response1 = conversationService.chat(request1);
-        assertNotNull(response1.getResult());
+        assertNotNull(response1.getContent());
 
         // Second turn - should maintain context
         ChatRequest request2 = ChatRequest.builder().conversationId(conversationId).userId("user123").message("What did I just ask you?").build();
 
         ChatResponse response2 = conversationService.chat(request2);
-        assertNotNull(response2.getResult());
+        assertNotNull(response2.getContent());
 
         // Verify context has both turns
         ChatContext context = conversationService.getContext(conversationId);

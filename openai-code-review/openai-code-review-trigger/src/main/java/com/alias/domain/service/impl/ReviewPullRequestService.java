@@ -1,34 +1,26 @@
 package com.alias.domain.service.impl;
 
+import com.alias.config.AppConfig;
 import com.alias.domain.model.ModelEnum;
+import com.alias.domain.prompt.ReviewPrompts;
 import com.alias.domain.service.AbstractOpenAiCodeReviewService;
+import com.alias.domain.utils.ChatUtils;
 import com.alias.infrastructure.git.GitCommand;
 import com.alias.infrastructure.openai.IOpenAI;
 import com.alias.infrastructure.openai.dto.ChatCompletionRequestDTO;
 import com.alias.infrastructure.openai.dto.ChatCompletionSyncResponseDTO;
-import com.alias.utils.VCSUtils;
-import com.alias.utils.GitHubPrUtils;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import com.alias.config.AppConfig;
-import com.alias.domain.prompt.ReviewPrompts;
+import com.alias.utils.*;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.alias.utils.ReviewJsonUtils;
-import com.alias.utils.ReviewCommentUtils;
-import com.alias.utils.IoUtils;
-import com.alias.utils.SeverityUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
 
@@ -240,6 +232,7 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
         chatCompletionRequest.setModel(this.model != null ? this.model : ModelEnum.GPT_4O.getCode());
         chatCompletionRequest.setMessages(new ArrayList<ChatCompletionRequestDTO.Prompt>() {
             private static final long serialVersionUID = -7988151926241837899L;
+
             {
                 add(new ChatCompletionRequestDTO.Prompt("user", mergedPrompt));
             }
@@ -355,6 +348,7 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
 
     /**
      * 从 RAG 服务获取代码上下文
+     * 调用 ChatUtils 中的 getRagContext 方法
      *
      * @param code 代码内容（原始diff文本）
      * @return RAG context 字符串
@@ -366,91 +360,13 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
             return "";
         }
 
-        // 从 repository 中提取 repoName（格式：owner/repo，提取 repo 部分）
-        String repoName = extractRepoName(this.repository);
-        if (repoName == null || repoName.isEmpty()) {
-            logger.warn("Cannot extract repoName from repository: {}", this.repository);
-            return "";
-        }
+        logger.info("Getting RAG context via ChatUtils. repository={}, codeSize={}", this.repository, code != null ? code.length() : 0);
 
-        // 获取 RAG 服务 URL
-        String ragBaseUrl = AppConfig.getInstance().getString("rag", "apiBaseUrl");
-        if (ragBaseUrl == null || ragBaseUrl.isEmpty()) {
-            logger.warn("RAG API base URL is not configured");
-            return "";
-        }
+        // 调用 ChatUtils 中的 getRagContext 方法
+        String ragContext = ChatUtils.getRagContext(code, this.repository);
 
-        // 构建 RAG 接口 URL
-        String apiUrl = ragBaseUrl + "/review-context";
-
-        logger.info("Calling RAG API to get context. repoName={}, codeSize={}", repoName, code != null ? code.length() : 0);
-
-        // 构建请求体 JSON
-        ObjectMapper mapper = new ObjectMapper();
-        Map<String, Object> requestMap = new HashMap<>();
-        requestMap.put("repoName", repoName);
-        requestMap.put("code", code != null ? code : "");
-        String requestBody = mapper.writeValueAsString(requestMap);
-
-        URL url = new URL(apiUrl);
-        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-        conn.setRequestMethod("POST");
-        conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-        conn.setRequestProperty("Accept", "application/json");
-        conn.setDoOutput(true);
-        conn.setConnectTimeout(10000); // 10 seconds
-        conn.setReadTimeout(30000); // 30 seconds
-
-        // 发送请求体
-        try (OutputStream os = conn.getOutputStream()) {
-            os.write(requestBody.getBytes(StandardCharsets.UTF_8));
-        }
-
-        int httpCode = conn.getResponseCode();
-        if (httpCode / 100 != 2) {
-            String errMsg = IoUtils.readStreamSafely(conn.getErrorStream());
-            throw new RuntimeException("RAG API call failed, code=" + httpCode + ", err=" + errMsg);
-        }
-
-        // 解析响应
-        String responseBody = IoUtils.readStreamSafely(conn.getInputStream());
-        JsonNode root = mapper.readTree(responseBody);
-
-        // 检查响应code
-        String responseCode = ReviewJsonUtils.safeText(root, "code");
-        if (!"0000".equals(responseCode)) {
-            String info = ReviewJsonUtils.safeText(root, "info");
-            logger.warn("RAG API returned non-success code: {}, info: {}", responseCode, info);
-            return "";
-        }
-
-        // 提取data字段
-        String context = ReviewJsonUtils.safeText(root, "data");
-        if (context == null || context.isEmpty()) {
-            logger.warn("RAG API returned empty context");
-            return "";
-        }
-
-        logger.info("Successfully retrieved RAG context. contextSize={}", context.length());
-        return context;
-    }
-
-    /**
-     * 从 repository 字符串中提取 repoName
-     * 格式：owner/repo，返回 repo 部分
-     *
-     * @param repository repository 字符串，格式：owner/repo
-     * @return repoName
-     */
-    private String extractRepoName(String repository) {
-        if (repository == null || repository.isEmpty()) {
-            return null;
-        }
-        int lastSlash = repository.lastIndexOf('/');
-        if (lastSlash >= 0 && lastSlash < repository.length() - 1) {
-            return repository.substring(lastSlash + 1);
-        }
-        return repository;
+        logger.info("RAG context retrieved. contextSize={}", ragContext.length());
+        return ragContext;
     }
 
     private String postCommentToGithubPr(String body) throws Exception {

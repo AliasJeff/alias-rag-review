@@ -2,6 +2,7 @@ package com.alias.rag.dev.tech.trigger.http;
 
 import com.alias.rag.dev.tech.api.IRAGService;
 import com.alias.rag.dev.tech.api.response.Response;
+import com.alias.rag.dev.tech.trigger.utils.RepositoryUtils;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -133,7 +134,7 @@ public class RAGController implements IRAGService {
           String token)
       throws Exception {
     String localPath = "./git-cloned-repo";
-    String repoProjectName = extractProjectName(repoUrl);
+    String repoProjectName = RepositoryUtils.extractProjectName(repoUrl);
     log.info("克隆路径：{}", new File(localPath).getAbsolutePath());
 
     FileUtils.deleteDirectory(new File(localPath));
@@ -149,8 +150,7 @@ public class RAGController implements IRAGService {
         Paths.get(localPath),
         new SimpleFileVisitor<>() {
           @Override
-          public FileVisitResult visitFile(Path file, BasicFileAttributes attrs)
-              throws IOException {
+          public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
             log.info("{} 遍历解析路径，上传知识库:{}", repoProjectName, file.getFileName());
             try {
               TikaDocumentReader reader = new TikaDocumentReader(new PathResource(file));
@@ -171,7 +171,7 @@ public class RAGController implements IRAGService {
           }
 
           @Override
-          public FileVisitResult visitFileFailed(Path file, IOException exc) throws IOException {
+          public FileVisitResult visitFileFailed(Path file, IOException exc) {
             log.warn("Failed to access file: {} - {}", file.toString(), exc.getMessage());
             return FileVisitResult.CONTINUE;
           }
@@ -189,11 +189,5 @@ public class RAGController implements IRAGService {
     log.info("遍历解析路径，上传完成:{}", repoUrl);
 
     return Response.<String>builder().code("0000").info("调用成功").build();
-  }
-
-  private String extractProjectName(String repoUrl) {
-    String[] parts = repoUrl.split("/");
-    String projectNameWithGit = parts[parts.length - 1];
-    return projectNameWithGit.replace(".git", "");
   }
 }

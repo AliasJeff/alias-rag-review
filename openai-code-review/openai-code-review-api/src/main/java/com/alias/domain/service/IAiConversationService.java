@@ -3,7 +3,10 @@ package com.alias.domain.service;
 import com.alias.domain.model.ChatContext;
 import com.alias.domain.model.ChatRequest;
 import com.alias.domain.model.ChatResponse;
+import com.alias.domain.model.Conversation;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+
+import java.util.UUID;
 
 /**
  * AI Conversation Service Interface
@@ -74,4 +77,12 @@ public interface IAiConversationService {
      * @return chat context with history
      */
     ChatContext getConversationHistory(String conversationId);
+
+    /**
+     * Get conversation by ID
+     *
+     * @param conversationId conversation ID (UUID)
+     * @return conversation object or null if not found
+     */
+    Conversation getConversationById(UUID conversationId);
 }

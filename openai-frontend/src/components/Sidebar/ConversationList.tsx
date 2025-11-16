@@ -92,7 +92,7 @@ export const ConversationList = ({
                     <div className={styles.itemTitle}>
                       {conv.title || "无标题"}
                     </div>
-                    {conv.status && (
+                    {/* {conv.status && (
                       <div
                         className={`${styles.itemStatus} ${
                           styles[conv.status]
@@ -100,7 +100,7 @@ export const ConversationList = ({
                       >
                         {getStatusLabel(conv.status)}
                       </div>
-                    )}
+                    )} */}
                   </>
                 )}
                 <div className={styles.itemTime}>

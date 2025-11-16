@@ -1,12 +1,14 @@
 package com.alias.rag.dev.tech.trigger.utils;
 
+import com.alias.rag.dev.tech.api.dto.RagRepoDTO;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.Resource;
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
 import org.eclipse.jgit.api.Git;
@@ -16,6 +18,7 @@ import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.revwalk.RevWalk;
+import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
 import org.eclipse.jgit.util.io.DisabledOutputStream;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.reader.tika.TikaDocumentReader;
@@ -24,18 +27,181 @@ import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.filter.Filter;
 import org.springframework.ai.vectorstore.filter.FilterExpressionBuilder;
 import org.springframework.ai.vectorstore.pgvector.PgVectorStore;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.PathResource;
 import org.springframework.stereotype.Component;
 
 @Slf4j
 @Component
-public class RagUtils {
+public class RepositoryUtils {
+
+  @Value("${repo.base-path}")
+  private String repoBasePath;
+
+  @Value("${github.token}")
+  private String githubToken;
+
+  @Value("${github.username}")
+  private String githubUsername;
 
   @Resource private TokenTextSplitter tokenTextSplitter;
 
   @Resource private PgVectorStore pgVectorStore;
 
-  @Resource private GitUtils gitUtils;
+  private static final ObjectMapper mapper = new ObjectMapper();
+
+  // ==================== Git Utils Methods ====================
+
+  public static String extractProjectName(String repoUrl) {
+    String[] parts = repoUrl.split("/");
+    String projectNameWithGit = parts[parts.length - 1];
+    return projectNameWithGit.replace(".git", "");
+  }
+
+  public void saveIndexedCommit(String repoName, String commit) {
+    try {
+      Path metaFile = Paths.get(repoBasePath, repoName, ".rag-meta.json");
+
+      Map<String, Object> meta = new HashMap<>();
+      meta.put("lastIndexedCommit", commit);
+      meta.put("updatedAt", System.currentTimeMillis());
+
+      mapper.writerWithDefaultPrettyPrinter().writeValue(metaFile.toFile(), meta);
+
+      log.info("Commit saved for {}: {}", repoName, commit);
+
+    } catch (Exception e) {
+      log.error("Failed to save commit for {}: {}", repoName, e.getMessage());
+    }
+  }
+
+  public String loadIndexedCommit(String repoName) {
+    try {
+      Path metaFile = Paths.get(repoBasePath, repoName, ".rag-meta.json");
+      if (!Files.exists(metaFile)) return null;
+
+      JsonNode node = mapper.readTree(metaFile.toFile());
+      return node.path("lastIndexedCommit").asText(null);
+
+    } catch (Exception e) {
+      log.error("Failed to load commit for {}: {}", repoName, e.getMessage());
+      return null;
+    }
+  }
+
+  /**
+   * 同步仓库代码，拉取最新更新。如果仓库不存在，则自动注册
+   *
+   * @param ragRepoDTO 包含仓库信息的 DTO
+   * @return SyncResult 包含当前 commit 和是否有变化，如果同步失败返回 null
+   */
+  public SyncResult syncRepository(RagRepoDTO ragRepoDTO) {
+    String repoName = ragRepoDTO.getRepoName();
+    Path repoPath = Paths.get(repoBasePath, repoName);
+    File localDir = repoPath.toFile();
+
+    // 如果仓库不存在，先自动注册
+    if (!localDir.exists()) {
+      log.info("Repository does not exist, auto-registering: {}", repoName);
+      if (!autoRegisterRepository(ragRepoDTO)) {
+        log.error("Failed to auto-register repository: {}", repoName);
+        return null;
+      }
+    }
+
+    Git git = null;
+    try {
+      git = Git.open(localDir);
+      Repository repository = git.getRepository();
+
+      // 获取本地记录的 commit
+      String lastIndexedCommit = loadIndexedCommit(repoName);
+      log.info("Last indexed commit for {}: {}", repoName, lastIndexedCommit);
+
+      // pull 最新代码
+      git.pull()
+          .setCredentialsProvider(
+              new UsernamePasswordCredentialsProvider(githubUsername, githubToken))
+          .call();
+
+      String currentCommit = repository.resolve("HEAD").name();
+      log.info("Current HEAD commit for {}: {}", repoName, currentCommit);
+
+      boolean hasChanges = !currentCommit.equals(lastIndexedCommit);
+      return new SyncResult(currentCommit, hasChanges);
+
+    } catch (Exception e) {
+      log.error("Failed to sync repository {}: {}", repoName, e.getMessage());
+      return null;
+    } finally {
+      if (git != null) {
+        try {
+          git.close();
+        } catch (Exception e) {
+          log.error("Failed to close git repository: {}", e.getMessage());
+        }
+      }
+    }
+  }
+
+  /**
+   * 自动注册仓库
+   *
+   * @param ragRepoDTO 包含仓库信息的 DTO
+   * @return 是否注册成功
+   */
+  private boolean autoRegisterRepository(RagRepoDTO ragRepoDTO) {
+    String repoUrl = ragRepoDTO.getRepoUrl();
+    String branch = ragRepoDTO.getBranch();
+    String repoName = ragRepoDTO.getRepoName();
+
+    if (repoUrl == null || repoUrl.isEmpty()) {
+      log.error("Repository URL is required for auto-registration");
+      return false;
+    }
+
+    Path repoPath = Paths.get(repoBasePath, repoName);
+    File localDir = repoPath.toFile();
+
+    log.info("Auto-registering repository {} from {}", repoName, repoUrl);
+
+    Git git = null;
+    try {
+      // Clone repository 到固定路径
+      git =
+          Git.cloneRepository()
+              .setURI(repoUrl)
+              .setDirectory(localDir)
+              .setBranch(branch != null ? branch : "main")
+              .setCredentialsProvider(
+                  new UsernamePasswordCredentialsProvider(githubUsername, githubToken))
+              .call();
+
+      // 全量构建向量库
+      indexRepositoryFiles(localDir.toPath(), repoName);
+
+      // 记录当前 HEAD commit
+      String headCommit = git.getRepository().resolve("HEAD").name();
+      saveIndexedCommit(repoName, headCommit);
+      log.info("Auto-registered repository successfully: {}", repoName);
+
+      return true;
+
+    } catch (Exception e) {
+      log.error("Failed to auto-register repository {}: {}", repoName, e.getMessage());
+      return false;
+    } finally {
+      if (git != null) {
+        try {
+          git.close();
+        } catch (Exception e) {
+          log.error("Failed to close git repository: {}", e.getMessage());
+        }
+      }
+    }
+  }
+
+  // ==================== Rag Utils Methods ====================
 
   public void indexRepositoryFiles(Path repoPath, String repoName) throws IOException {
 
@@ -48,8 +214,7 @@ public class RagUtils {
         repoPath,
         new SimpleFileVisitor<>() {
           @Override
-          public FileVisitResult visitFile(Path file, BasicFileAttributes attrs)
-              throws IOException {
+          public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
 
             String filename = file.getFileName().toString().toLowerCase();
             if (ALLOWED.stream().noneMatch(filename::endsWith)) return FileVisitResult.CONTINUE;
@@ -88,7 +253,7 @@ public class RagUtils {
             ".json");
 
     // 1. 获取上一次索引 commit
-    String lastIndexedCommit = gitUtils.loadIndexedCommit(repoName);
+    String lastIndexedCommit = loadIndexedCommit(repoName);
     if (lastIndexedCommit == null) {
       log.info("No previous commit found, full indexing {}", repoName);
       indexRepositoryFiles(repoPath, repoName);
@@ -124,13 +289,13 @@ public class RagUtils {
           switch (type) {
             case ADD:
               path = diff.getNewPath();
-              if (!ALLOWED.stream().anyMatch(path.toLowerCase()::endsWith)) continue;
+              if (ALLOWED.stream().noneMatch(path.toLowerCase()::endsWith)) continue;
               indexFile(repoPath, repoName, path);
               break;
 
             case MODIFY:
               path = diff.getNewPath();
-              if (!ALLOWED.stream().anyMatch(path.toLowerCase()::endsWith)) continue;
+              if (ALLOWED.stream().noneMatch(path.toLowerCase()::endsWith)) continue;
 
               // 先查出对应文档并删除
               String docId = repoName + ":" + path.replace("\\", "/");
@@ -155,7 +320,7 @@ public class RagUtils {
     }
 
     // 3. 更新 commit
-    gitUtils.saveIndexedCommit(repoName, headCommit);
+    saveIndexedCommit(repoName, headCommit);
     log.info("Updated last indexed commit for {}: {}", repoName, headCommit);
   }
 
@@ -206,7 +371,7 @@ public class RagUtils {
   }
 
   /** 根据代码片段返回上下文信息（检索向量库匹配片段） */
-  public String reviewCodeContext(String repoName, String code) throws IOException {
+  public String reviewCodeContext(String repoName, String code) {
     // 1. 将代码分块
     Document doc = new Document(code);
     List<Document> chunks = tokenTextSplitter.apply(List.of(doc));
@@ -220,7 +385,11 @@ public class RagUtils {
 
       // 3. 构建搜索请求
       SearchRequest request =
-          SearchRequest.builder().query(chunk.getText()).topK(5).filterExpression(filter).build();
+          SearchRequest.builder()
+              .query(Objects.requireNonNull(chunk.getText()))
+              .topK(5)
+              .filterExpression(filter)
+              .build();
 
       // 4. 执行相似度搜索
       List<Document> matched = pgVectorStore.similaritySearch(request);
@@ -235,7 +404,17 @@ public class RagUtils {
 
   /** 获取仓库的 Git tag 列表 */
   public List<String> getRepositoryTags(String repoName) throws IOException {
-    List<String> tags = new ArrayList<>();
-    return tags;
+    return new ArrayList<>();
+  }
+
+  /** 同步结果类 */
+  public static class SyncResult {
+    public final String currentCommit;
+    public final boolean hasChanges;
+
+    public SyncResult(String currentCommit, boolean hasChanges) {
+      this.currentCommit = currentCommit;
+      this.hasChanges = hasChanges;
+    }
   }
 }

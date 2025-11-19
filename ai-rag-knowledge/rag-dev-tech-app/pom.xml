@@ -118,7 +118,7 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <configuration>
-                    <mainClass>com.alias.rag.dev.tech.Application</mainClass>
+                    <mainClass>com.alias.rag.dev.tech.RagApplication</mainClass>
                     <layout>JAR</layout>
                 </configuration>
             </plugin>

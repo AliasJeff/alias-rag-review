@@ -2,8 +2,10 @@ package com.alias.domain.service.impl;
 
 import com.alias.config.AppConfig;
 import com.alias.domain.model.ModelEnum;
+import com.alias.domain.model.PrSnapshot;
 import com.alias.domain.prompt.ReviewPrompts;
 import com.alias.domain.service.AbstractOpenAiCodeReviewService;
+import com.alias.domain.service.IPrSnapshotService;
 import com.alias.domain.utils.ChatUtils;
 import com.alias.infrastructure.git.GitCommand;
 import org.springframework.ai.chat.client.ChatClient;
@@ -11,6 +13,7 @@ import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import com.alias.utils.*;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -22,6 +25,7 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 
 public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
 
@@ -34,10 +38,17 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
     private String model;      // 模型名称，默认使用 GPT-4o
 
     private ChatClient chatClient;
+    private final IPrSnapshotService prSnapshotService;
+    private UUID clientIdentifier;
 
     public ReviewPullRequestService(GitCommand gitCommand, ChatClient chatClient) {
+        this(gitCommand, chatClient, null);
+    }
+
+    public ReviewPullRequestService(GitCommand gitCommand, ChatClient chatClient, IPrSnapshotService prSnapshotService) {
         super(gitCommand, null);
         this.chatClient = chatClient;
+        this.prSnapshotService = prSnapshotService;
         this.model = ModelEnum.GPT_4O.getCode(); // 默认模型
     }
 
@@ -69,6 +80,10 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
      */
     public void setModel(ModelEnum modelEnum) {
         this.model = modelEnum.getCode();
+    }
+
+    public void setClientIdentifier(UUID clientIdentifier) {
+        this.clientIdentifier = clientIdentifier;
     }
 
     /**
@@ -122,6 +137,8 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
             logger.warn("No files found in diff, returning empty review");
             return mapper.writeValueAsString(createEmptyReview());
         }
+
+        persistSnapshotAsync(files);
 
         // 遍历每个文件，分别进行review
         List<JsonNode> fileReviews = new ArrayList<>();
@@ -190,7 +207,8 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
         // 将 JsonNode 列表转换为 Map 列表，确保正确序列化
         List<Map<String, Object>> commentsList = new ArrayList<>();
         for (JsonNode comment : allComments) {
-            Map<String, Object> commentMap = mapper.convertValue(comment, Map.class);
+            Map<String, Object> commentMap = mapper.convertValue(comment, new TypeReference<Map<String, Object>>() {
+            });
             commentsList.add(commentMap);
         }
 
@@ -204,6 +222,49 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
         String finalResult = mapper.writeValueAsString(mergedReview);
         logger.info("Completed per-file review. totalFiles={}, overallScore={}, totalComments={}", files.size(), overallScore, allComments.size());
         return finalResult;
+    }
+
+    private void persistSnapshotAsync(List<VCSUtils.FileChanges> files) {
+        if (prSnapshotService == null || files == null || files.isEmpty() || prUrl == null || prUrl.isEmpty()) {
+            logger.debug("Skip snapshot persistence due to missing dependency or data. url={}", prUrl);
+            return;
+        }
+
+        List<VCSUtils.FileChanges> snapshotFiles = new ArrayList<>(files);
+        String snapshotUrl = this.prUrl;
+        String snapshotRepo = this.repository;
+        Integer snapshotPrNumber = safeParsePrNumber(this.prNumber);
+        UUID snapshotClient = this.clientIdentifier;
+
+        CompletableFuture.runAsync(() -> {
+            try {
+                ObjectMapper mapper = new ObjectMapper();
+                Map<String, Object> payload = new HashMap<>();
+                List<Map<String, Object>> filePayload = mapper.convertValue(snapshotFiles, new TypeReference<List<Map<String, Object>>>() {
+                });
+                payload.put("files", filePayload);
+                payload.put("totalFiles", snapshotFiles.size());
+
+                PrSnapshot snapshot = PrSnapshot.builder().url(snapshotUrl).clientIdentifier(snapshotClient).repoName(snapshotRepo).prNumber(snapshotPrNumber).branch(null).fileChanges(payload).build();
+
+                prSnapshotService.createSnapshot(snapshot);
+                logger.info("Persisted PR snapshot asynchronously. url={}, files={}", snapshotUrl, snapshotFiles.size());
+            } catch (Exception e) {
+                logger.warn("Failed to persist PR snapshot. url={}, err={}", snapshotUrl, e.getMessage(), e);
+            }
+        });
+    }
+
+    private Integer safeParsePrNumber(String raw) {
+        if (raw == null || raw.isEmpty()) {
+            return null;
+        }
+        try {
+            return Integer.parseInt(raw);
+        } catch (NumberFormatException ex) {
+            logger.warn("Failed to parse PR number: {}", raw);
+            return null;
+        }
     }
 
     /**

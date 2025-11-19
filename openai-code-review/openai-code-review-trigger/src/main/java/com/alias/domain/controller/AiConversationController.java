@@ -3,6 +3,7 @@ package com.alias.domain.controller;
 import com.alias.config.AppConfig;
 import com.alias.domain.model.*;
 import com.alias.domain.service.IAiConversationService;
+import com.alias.domain.service.IPrSnapshotService;
 import com.alias.domain.service.impl.ReviewPullRequestStreamingService;
 import com.alias.domain.utils.ChatUtils;
 import com.alias.infrastructure.git.GitCommand;
@@ -36,6 +37,9 @@ public class AiConversationController {
 
     @Resource
     private ChatClient chatClient;
+
+    @Resource
+    private IPrSnapshotService prSnapshotService;
 
 
     @PostConstruct
@@ -255,7 +259,7 @@ public class AiConversationController {
                         if (prUrl == null || prUrl.isEmpty()) {
                             log.info("No PR URL found for review intent. conversationId={}", requestForThread.getConversationId());
                             try {
-                                String message = "为了提供更准确的代码审查，请提供 PR URL。";
+                                String message = "为了提供更准确的代码审查，请提供 PR URL。\n\n\n\n";
                                 emitter.send(SseEmitter.event().name("message").data(buildEmitterPayload(message, requestForThread.getConversationId())));
                                 emitter.send(SseEmitter.event().name("complete").data("Streaming completed"));
                                 emitter.complete();
@@ -273,15 +277,16 @@ public class AiConversationController {
                                 log.info("Starting code review for PR. conversationId={}, prUrl={}", requestForThread.getConversationId(), prUrl);
 
                                 // Send review start event
-                                emitter.send(SseEmitter.event().name("review_start").data(buildEmitterPayload("Reviewing PR: " + prUrl + "\n", requestForThread.getConversationId())));
+                                emitter.send(SseEmitter.event().name("review_start").data(buildEmitterPayload("Reviewing PR: " + prUrl + "\n\n\n\n", requestForThread.getConversationId())));
 
                                 // Get GitHub token from config
                                 String githubToken = AppConfig.getInstance().requireString("github", "token");
 
                                 // Create GitCommand and ReviewPullRequestStreamingService
                                 GitCommand gitCommand = new GitCommand(githubToken);
-                                ReviewPullRequestStreamingService reviewService = new ReviewPullRequestStreamingService(gitCommand, chatClient);
+                                ReviewPullRequestStreamingService reviewService = new ReviewPullRequestStreamingService(gitCommand, chatClient, prSnapshotService);
                                 reviewService.setConversationId(requestForThread.getConversationId());
+                                reviewService.setClientIdentifier(parseUuidQuietly(requestForThread.getUserId()));
 
                                 // Parse PR URL and set parameters
                                 GitHubPrUtils.PrInfo prInfo = GitHubPrUtils.parsePrUrl(prUrl);
@@ -387,6 +392,18 @@ public class AiConversationController {
         // Could also be extracted from conversation context or metadata
         // For now, return null if not found
         return null;
+    }
+
+    private UUID parseUuidQuietly(String raw) {
+        if (raw == null || raw.isEmpty()) {
+            return null;
+        }
+        try {
+            return UUID.fromString(raw);
+        } catch (IllegalArgumentException e) {
+            log.warn("Invalid UUID format for client identifier: {}", raw);
+            return null;
+        }
     }
 
     /**

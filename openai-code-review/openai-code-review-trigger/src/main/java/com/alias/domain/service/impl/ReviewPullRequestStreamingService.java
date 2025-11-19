@@ -2,11 +2,14 @@ package com.alias.domain.service.impl;
 
 import com.alias.config.AppConfig;
 import com.alias.domain.model.ModelEnum;
+import com.alias.domain.model.PrSnapshot;
 import com.alias.domain.prompt.ReviewPrompts;
 import com.alias.domain.service.AbstractOpenAiCodeReviewService;
+import com.alias.domain.service.IPrSnapshotService;
 import com.alias.domain.utils.ChatUtils;
 import com.alias.infrastructure.git.GitCommand;
 import com.alias.utils.*;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -23,6 +26,7 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * Streaming version of ReviewPullRequestService
@@ -40,10 +44,17 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
     private String model;      // 模型名称，默认使用 GPT-4o
 
     private ChatClient chatClient;
+    private final IPrSnapshotService prSnapshotService;
+    private UUID clientIdentifier;
 
     public ReviewPullRequestStreamingService(GitCommand gitCommand, ChatClient chatClient) {
+        this(gitCommand, chatClient, null);
+    }
+
+    public ReviewPullRequestStreamingService(GitCommand gitCommand, ChatClient chatClient, IPrSnapshotService prSnapshotService) {
         super(gitCommand, null);
         this.chatClient = chatClient;
+        this.prSnapshotService = prSnapshotService;
         this.model = ModelEnum.GPT_4O.getCode(); // 默认模型
     }
 
@@ -61,6 +72,10 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
 
     public void setConversationId(String conversationId) {
         this.conversationId = conversationId;
+    }
+
+    public void setClientIdentifier(UUID clientIdentifier) {
+        this.clientIdentifier = clientIdentifier;
     }
 
     /**
@@ -180,9 +195,11 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
 
         if (files.isEmpty()) {
             logger.warn("No files found in diff, returning empty review");
-            emitter.send(SseEmitter.event().name("review").data(buildEmitterPayload("No files found in diff, returning empty review\n")));
+            emitter.send(SseEmitter.event().name("review").data(buildEmitterPayload("No files found in diff, returning empty review\n\n\n\n")));
             return;
         }
+
+        persistSnapshotAsync(files);
 
         // 遍历每个文件，分别进行流式review
         List<JsonNode> fileReviews = new ArrayList<>();
@@ -192,16 +209,17 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
         List<JsonNode> allComments = new ArrayList<>();
 
         logger.info("Starting per-file streaming review. totalFiles={}", files.size());
-        emitter.send(SseEmitter.event().name("review_start").data(buildEmitterPayload("Starting per-file streaming review. totalFiles=" + files.size() + "\n")));
+        emitter.send(SseEmitter.event().name("review_start").data(buildEmitterPayload("Starting per-file streaming review. totalFiles=" + files.size() + "\n\n\n\n")));
         for (int i = 0; i < files.size(); i++) {
             VCSUtils.FileChanges file = files.get(i);
             logger.info("Reviewing file {}/{}. path={}", i + 1, files.size(), file.path);
-            emitter.send(SseEmitter.event().name("file_start").data(buildEmitterPayload("Reviewing file " + i + "/" + files.size() + ". path=" + file.path + "\n")));
+            String displayPath = shortenPath(file.path);
+            emitter.send(SseEmitter.event().name("file_start").data(buildEmitterPayload("Reviewing file " + i + "/" + files.size() + ". path=" + displayPath + "\n\n\n\n")));
 
             try {
                 // 从 RAG 获取 context
                 String ragContext = getRagContext(safeDiff);
-                emitter.send(SseEmitter.event().name("rag_context_success").data(buildEmitterPayload("RAG context retrieved. contextSize=" + (ragContext != null ? ragContext.length() : 0) + "\n")));
+                emitter.send(SseEmitter.event().name("rag_context_success").data(buildEmitterPayload("RAG context retrieved. contextSize=" + (ragContext != null ? ragContext.length() : 0) + "\n\n\n\n")));
 
                 // 对单个文件进行流式review
                 String fileReviewJson = reviewSingleFileStreaming(file, ragContext, MAX_PROMPT_CHARS, emitter);
@@ -228,7 +246,7 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
                 // 提取summary
                 String summary = ReviewJsonUtils.safeText(fileReview, "summary");
                 if (summary != null && !summary.isEmpty()) {
-                    summaries.add(String.format("[%s] %s", file.path, summary));
+                    summaries.add(String.format("[%s] %s", displayPath, summary));
                 }
 
                 // 提取comments
@@ -245,10 +263,10 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
                 logger.error("Failed to review file. path={}, err={}", file.path, e.toString(), e);
                 // 发送文件审查错误事件
                 Map<String, Object> fileErrorEvent = new HashMap<>();
-                fileErrorEvent.put("file", file.path);
+                fileErrorEvent.put("file", displayPath);
                 fileErrorEvent.put("error", e.getMessage());
                 try {
-                    emitter.send(SseEmitter.event().name("file_error").data(buildEmitterPayload("Error reviewing file " + i + "/" + files.size() + ". path=" + file.path + ". error=" + e.getMessage() + "\n")));
+                    emitter.send(SseEmitter.event().name("file_error").data(buildEmitterPayload("Error reviewing file " + i + "/" + files.size() + ". path=" + displayPath + ". error=" + e.getMessage() + "\n\n\n\n")));
                 } catch (IOException ex) {
                     logger.error("Error sending file error event", ex);
                 }
@@ -262,7 +280,8 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
         // 将 JsonNode 列表转换为 Map 列表
         List<Map<String, Object>> commentsList = new ArrayList<>();
         for (JsonNode comment : allComments) {
-            Map<String, Object> commentMap = mapper.convertValue(comment, Map.class);
+            Map<String, Object> commentMap = mapper.convertValue(comment, new TypeReference<Map<String, Object>>() {
+            });
             commentsList.add(commentMap);
         }
 
@@ -274,17 +293,60 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
         mergedReview.put("comments", commentsList);
 
         // 发送最终审查结果
-        emitter.send(SseEmitter.event().name("review_summary").data(buildEmitterPayload("Completed streaming review.\n")));
-        emitter.send(SseEmitter.event().name("review_summary").data(buildEmitterPayload("Overall score: " + overallScore + "\n")));
-        emitter.send(SseEmitter.event().name("review_summary").data(buildEmitterPayload("Summary: " + combinedSummary + "\n")));
-        emitter.send(SseEmitter.event().name("review_summary").data(buildEmitterPayload("General review: " + "This review was generated by reviewing each file separately and merging the results." + "\n")));
-        emitter.send(SseEmitter.event().name("review_summary").data(buildEmitterPayload("Comments: " + commentsList.size() + "\n")));
+        emitter.send(SseEmitter.event().name("review_summary").data(buildEmitterPayload("Completed streaming review.\n\n\n\n")));
+        emitter.send(SseEmitter.event().name("review_summary").data(buildEmitterPayload("Overall score: " + overallScore + "\n\n\n\n")));
+        emitter.send(SseEmitter.event().name("review_summary").data(buildEmitterPayload("Summary: " + combinedSummary + "\n\n\n\n")));
+        emitter.send(SseEmitter.event().name("review_summary").data(buildEmitterPayload("General review: " + "This review was generated by reviewing each file separately and merging the results." + "\n\n\n\n")));
+        emitter.send(SseEmitter.event().name("review_summary").data(buildEmitterPayload("Comments: " + commentsList.size() + "\n\n\n\n")));
         for (Map<String, Object> comment : commentsList) {
-            emitter.send(SseEmitter.event().name("review_summary").data(buildEmitterPayload("Comment: " + comment.get("body") + "\n")));
+            emitter.send(SseEmitter.event().name("review_summary").data(buildEmitterPayload("Comment: " + comment.get("body") + "\n\n\n\n")));
         }
 
         logger.info("Completed per-file streaming review. totalFiles={}, overallScore={}, totalComments={}", files.size(), overallScore, allComments.size());
-        emitter.send(SseEmitter.event().name("review_complete").data(buildEmitterPayload("Completed streaming review. totalFiles=" + files.size() + ", overallScore=" + overallScore + ", totalComments=" + allComments.size() + "\n")));
+        emitter.send(SseEmitter.event().name("review_complete").data(buildEmitterPayload("Completed streaming review. totalFiles=" + files.size() + ", overallScore=" + overallScore + ", totalComments=" + allComments.size() + "\n\n\n\n")));
+    }
+
+    private void persistSnapshotAsync(List<VCSUtils.FileChanges> files) {
+        if (prSnapshotService == null || files == null || files.isEmpty() || prUrl == null || prUrl.isEmpty()) {
+            logger.debug("Skip snapshot persistence due to missing dependency or data. url={}", prUrl);
+            return;
+        }
+
+        List<VCSUtils.FileChanges> snapshotFiles = new ArrayList<>(files);
+        String snapshotUrl = this.prUrl;
+        String snapshotRepo = this.repository;
+        Integer snapshotPrNumber = safeParsePrNumber(this.prNumber);
+        UUID snapshotClient = this.clientIdentifier;
+
+        CompletableFuture.runAsync(() -> {
+            try {
+                ObjectMapper mapper = new ObjectMapper();
+                Map<String, Object> payload = new HashMap<>();
+                List<Map<String, Object>> filePayload = mapper.convertValue(snapshotFiles, new TypeReference<List<Map<String, Object>>>() {
+                });
+                payload.put("files", filePayload);
+                payload.put("totalFiles", snapshotFiles.size());
+
+                PrSnapshot snapshot = PrSnapshot.builder().url(snapshotUrl).clientIdentifier(snapshotClient).repoName(snapshotRepo).prNumber(snapshotPrNumber).branch(null).fileChanges(payload).build();
+
+                prSnapshotService.createSnapshot(snapshot);
+                logger.info("Persisted PR snapshot asynchronously (streaming). url={}, files={}", snapshotUrl, snapshotFiles.size());
+            } catch (Exception e) {
+                logger.warn("Failed to persist PR snapshot (streaming). url={}, err={}", snapshotUrl, e.getMessage(), e);
+            }
+        });
+    }
+
+    private Integer safeParsePrNumber(String raw) {
+        if (raw == null || raw.isEmpty()) {
+            return null;
+        }
+        try {
+            return Integer.parseInt(raw);
+        } catch (NumberFormatException ex) {
+            logger.warn("Failed to parse PR number: {}", raw);
+            return null;
+        }
     }
 
     /**
@@ -340,6 +402,7 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
     /**
      * 创建空的review结果
      */
+    @SuppressWarnings("unused")
     private Map<String, Object> createEmptyReview() {
         Map<String, Object> review = new HashMap<>();
         review.put("overall_score", 0);
@@ -551,6 +614,25 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
             throw new RuntimeException("Create PR review failed, code=" + code + ", err=" + errMsg);
         }
         logger.info("PR review created successfully. code={}", code);
+    }
+
+    private String shortenPath(String path) {
+        if (path == null || path.isEmpty()) {
+            return "";
+        }
+        String normalized = path.replace("\\", "/");
+        String[] rawParts = normalized.split("/");
+        List<String> parts = new ArrayList<>();
+        for (String part : rawParts) {
+            if (!part.isEmpty()) {
+                parts.add(part);
+            }
+        }
+        if (parts.isEmpty()) {
+            return normalized;
+        }
+        int start = Math.max(parts.size() - 3, 0);
+        return String.join("/", parts.subList(start, parts.size()));
     }
 
     private static final class ReviewCommentDetail {

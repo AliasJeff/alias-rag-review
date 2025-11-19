@@ -95,9 +95,11 @@ public class RepositoryUtils {
    * @param ragRepoDTO 包含仓库信息的 DTO
    * @return SyncResult 包含当前 commit 和是否有变化，如果同步失败返回 null
    */
-  public SyncResult syncRepository(RagRepoDTO ragRepoDTO) {
+  public SyncResult syncRepository(RagRepoDTO ragRepoDTO) throws IOException {
     String repoName = ragRepoDTO.getRepoName();
-    Path repoPath = Paths.get(repoBasePath, repoName);
+    Path baseDir = Paths.get(System.getProperty("user.home"), "ai-rag-repos");
+    Files.createDirectories(baseDir);
+    Path repoPath = baseDir.resolve(repoName);
     File localDir = repoPath.toFile();
 
     // 如果仓库不存在，先自动注册
@@ -150,7 +152,7 @@ public class RepositoryUtils {
    * @param ragRepoDTO 包含仓库信息的 DTO
    * @return 是否注册成功
    */
-  private boolean autoRegisterRepository(RagRepoDTO ragRepoDTO) {
+  private boolean autoRegisterRepository(RagRepoDTO ragRepoDTO) throws IOException {
     String repoUrl = ragRepoDTO.getRepoUrl();
     String branch = ragRepoDTO.getBranch();
     String repoName = ragRepoDTO.getRepoName();
@@ -160,8 +162,11 @@ public class RepositoryUtils {
       return false;
     }
 
-    Path repoPath = Paths.get(repoBasePath, repoName);
-    File localDir = repoPath.toFile();
+    Path baseDir = Paths.get(System.getProperty("user.home"), "ai-rag-repos");
+    Files.createDirectories(baseDir);
+
+    Path repoPath = baseDir.resolve(repoName);
+    Files.createDirectories(repoPath);
 
     log.info("Auto-registering repository {} from {}", repoName, repoUrl);
 
@@ -171,14 +176,14 @@ public class RepositoryUtils {
       git =
           Git.cloneRepository()
               .setURI(repoUrl)
-              .setDirectory(localDir)
+              .setDirectory(repoPath.toFile())
               .setBranch(branch != null ? branch : "main")
               .setCredentialsProvider(
                   new UsernamePasswordCredentialsProvider(githubUsername, githubToken))
               .call();
 
       // 全量构建向量库
-      indexRepositoryFiles(localDir.toPath(), repoName);
+      indexRepositoryFiles(repoPath.toAbsolutePath(), repoName);
 
       // 记录当前 HEAD commit
       String headCommit = git.getRepository().resolve("HEAD").name();

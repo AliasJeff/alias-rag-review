@@ -10,6 +10,7 @@ import styles from "./Message.module.css";
 
 interface MessageProps {
   message: MessageType;
+  streaming?: boolean;
 }
 
 /**
@@ -53,7 +54,7 @@ const getMarkdownComponents = (): Record<string, any> => ({
  * Message component for rendering individual chat messages
  * Handles both user and assistant messages with proper styling and markdown rendering
  */
-export const Message = ({ message }: MessageProps) => {
+export const Message = ({ message, streaming = false }: MessageProps) => {
   const isUser = message.role === "user";
   const markdownComponents = getMarkdownComponents();
 
@@ -101,6 +102,12 @@ export const Message = ({ message }: MessageProps) => {
               >
                 {message.content}
               </ReactMarkdown>
+              {message?.content && streaming && (
+                <div className={styles.loading}>
+                  <Loader className={styles.spinner} size={16} />
+                  <span>正在生成...</span>
+                </div>
+              )}
             </div>
             <div className={styles.time}>
               {new Date(message.createdAt).toLocaleTimeString()}

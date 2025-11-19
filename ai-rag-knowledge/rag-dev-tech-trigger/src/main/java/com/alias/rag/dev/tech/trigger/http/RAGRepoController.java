@@ -8,6 +8,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
@@ -47,7 +48,9 @@ public class RAGRepoController implements IRAGRepoService {
     String repoName = RepositoryUtils.extractProjectName(repoUrl);
 
     // 2. 确定仓库长期保存路径
-    Path repoPath = Paths.get(repoBasePath, repoName);
+    Path baseDir = Paths.get(System.getProperty("user.home"), "ai-rag-repos");
+    Files.createDirectories(baseDir);
+    Path repoPath = baseDir.resolve(repoName);
     File localDir = repoPath.toFile();
 
     // 若目录已存在，说明已注册

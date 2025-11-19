@@ -21,7 +21,26 @@ public interface IPrSnapshotRepository {
      * @param snapshot the snapshot to save
      * @return number of rows affected
      */
-    @Insert("INSERT INTO pr_snapshots (id, conversation_id, file_path, diff, content_before, content_after, metadata, created_at) " + "VALUES (#{id, javaType=java.util.UUID, jdbcType=OTHER}, " + "#{conversationId, javaType=java.util.UUID, jdbcType=OTHER}, " + "#{filePath, jdbcType=VARCHAR}, " + "#{diff, jdbcType=VARCHAR}, " + "#{contentBefore, jdbcType=VARCHAR}, " + "#{contentAfter, jdbcType=VARCHAR}, " + "#{metadata, jdbcType=OTHER, typeHandler=com.alias.infrastructure.typehandler.JsonbTypeHandler}, " + "#{createdAt, jdbcType=TIMESTAMP})")
+    @Insert("""
+            INSERT INTO pr_snapshots (id, url, client_identifier, repo_name, pr_number, branch, file_changes, created_at, updated_at)
+            VALUES (#{id, javaType=java.util.UUID, jdbcType=OTHER},
+                    #{url, jdbcType=VARCHAR},
+                    #{clientIdentifier, javaType=java.util.UUID, jdbcType=OTHER},
+                    #{repoName, jdbcType=VARCHAR},
+                    #{prNumber, jdbcType=INTEGER},
+                    #{branch, jdbcType=VARCHAR},
+                    #{fileChanges, jdbcType=OTHER, typeHandler=com.alias.infrastructure.typehandler.JsonbTypeHandler},
+                    #{createdAt, jdbcType=TIMESTAMP},
+                    #{updatedAt, jdbcType=TIMESTAMP})
+            ON CONFLICT (id) DO UPDATE SET
+                url = EXCLUDED.url,
+                client_identifier = EXCLUDED.client_identifier,
+                repo_name = EXCLUDED.repo_name,
+                pr_number = EXCLUDED.pr_number,
+                branch = EXCLUDED.branch,
+                file_changes = EXCLUDED.file_changes,
+                updated_at = CURRENT_TIMESTAMP
+            """)
     int save(PrSnapshot snapshot);
 
     /**
@@ -30,42 +49,41 @@ public interface IPrSnapshotRepository {
      * @param id the snapshot ID
      * @return optional containing the snapshot
      */
-    @Select("SELECT id, conversation_id, file_path, diff, content_before, content_after, metadata, created_at " + "FROM pr_snapshots WHERE id = #{id, javaType=java.util.UUID, jdbcType=OTHER}")
-    @Results(id = "prSnapshotResultMap", value = {@Result(column = "id", property = "id", javaType = UUID.class, jdbcType = org.apache.ibatis.type.JdbcType.OTHER), @Result(column = "conversation_id", property = "conversationId", javaType = UUID.class, jdbcType = org.apache.ibatis.type.JdbcType.OTHER), @Result(column = "file_path", property = "filePath", jdbcType = org.apache.ibatis.type.JdbcType.VARCHAR), @Result(column = "diff", property = "diff", jdbcType = org.apache.ibatis.type.JdbcType.VARCHAR), @Result(column = "content_before", property = "contentBefore", jdbcType = org.apache.ibatis.type.JdbcType.VARCHAR), @Result(column = "content_after", property = "contentAfter", jdbcType = org.apache.ibatis.type.JdbcType.VARCHAR), @Result(column = "metadata", property = "metadata", jdbcType = org.apache.ibatis.type.JdbcType.OTHER, typeHandler = JsonbTypeHandler.class), @Result(column = "created_at", property = "createdAt", jdbcType = org.apache.ibatis.type.JdbcType.TIMESTAMP)
+    @Select("SELECT id, url, client_identifier, repo_name, pr_number, branch, file_changes, created_at, updated_at " + "FROM pr_snapshots WHERE id = #{id, javaType=java.util.UUID, jdbcType=OTHER}")
+    @Results(id = "prSnapshotResultMap", value = {@Result(column = "id", property = "id", javaType = UUID.class, jdbcType = org.apache.ibatis.type.JdbcType.OTHER), @Result(column = "url", property = "url", jdbcType = org.apache.ibatis.type.JdbcType.VARCHAR), @Result(column = "client_identifier", property = "clientIdentifier", javaType = UUID.class, jdbcType = org.apache.ibatis.type.JdbcType.OTHER), @Result(column = "repo_name", property = "repoName", jdbcType = org.apache.ibatis.type.JdbcType.VARCHAR), @Result(column = "pr_number", property = "prNumber", jdbcType = org.apache.ibatis.type.JdbcType.INTEGER), @Result(column = "branch", property = "branch", jdbcType = org.apache.ibatis.type.JdbcType.VARCHAR), @Result(column = "file_changes", property = "fileChanges", jdbcType = org.apache.ibatis.type.JdbcType.OTHER, typeHandler = JsonbTypeHandler.class), @Result(column = "created_at", property = "createdAt", jdbcType = org.apache.ibatis.type.JdbcType.TIMESTAMP), @Result(column = "updated_at", property = "updatedAt", jdbcType = org.apache.ibatis.type.JdbcType.TIMESTAMP)
     })
     Optional<PrSnapshot> findById(UUID id);
 
     /**
-     * Find all snapshots for a conversation
+     * Find all snapshots for a client
      *
-     * @param conversationId the conversation ID
+     * @param clientIdentifier the client identifier
      * @return list of snapshots
      */
-    @Select("SELECT id, conversation_id, file_path, diff, content_before, content_after, metadata, created_at " + "FROM pr_snapshots WHERE conversation_id = #{conversationId, javaType=java.util.UUID, jdbcType=OTHER} " + "ORDER BY created_at DESC")
+    @Select("SELECT id, url, client_identifier, repo_name, pr_number, branch, file_changes, created_at, updated_at " + "FROM pr_snapshots WHERE client_identifier = #{clientIdentifier, javaType=java.util.UUID, jdbcType=OTHER} " + "ORDER BY updated_at DESC")
     @ResultMap("prSnapshotResultMap")
-    List<PrSnapshot> findByConversationId(UUID conversationId);
+    List<PrSnapshot> findByClientIdentifier(UUID clientIdentifier);
 
     /**
-     * Find snapshot by conversation ID and file path
+     * Find snapshot by PR url
      *
-     * @param conversationId the conversation ID
-     * @param filePath       the file path
+     * @param url the PR url
      * @return optional containing the snapshot
      */
-    @Select("SELECT id, conversation_id, file_path, diff, content_before, content_after, metadata, created_at " + "FROM pr_snapshots WHERE conversation_id = #{conversationId, javaType=java.util.UUID, jdbcType=OTHER} " + "AND file_path = #{filePath, jdbcType=VARCHAR} " + "LIMIT 1")
+    @Select("SELECT id, url, client_identifier, repo_name, pr_number, branch, file_changes, created_at, updated_at " + "FROM pr_snapshots WHERE url = #{url, jdbcType=VARCHAR} " + "LIMIT 1")
     @ResultMap("prSnapshotResultMap")
-    Optional<PrSnapshot> findByConversationIdAndFilePath(UUID conversationId, String filePath);
+    Optional<PrSnapshot> findByUrl(String url);
 
     /**
-     * Find snapshots by file path pattern (using LIKE)
+     * Find snapshots by repository name and PR number
      *
-     * @param conversationId  the conversation ID
-     * @param filePathPattern the file path pattern
-     * @return list of matching snapshots
+     * @param repoName the repository name
+     * @param prNumber the PR number
+     * @return list of snapshots
      */
-    @Select("SELECT id, conversation_id, file_path, diff, content_before, content_after, metadata, created_at " + "FROM pr_snapshots WHERE conversation_id = #{conversationId, javaType=java.util.UUID, jdbcType=OTHER} " + "AND file_path LIKE #{filePathPattern, jdbcType=VARCHAR} " + "ORDER BY created_at DESC")
+    @Select("SELECT id, url, client_identifier, repo_name, pr_number, branch, file_changes, created_at, updated_at " + "FROM pr_snapshots WHERE repo_name = #{repoName, jdbcType=VARCHAR} " + "AND pr_number = #{prNumber, jdbcType=INTEGER} " + "ORDER BY updated_at DESC")
     @ResultMap("prSnapshotResultMap")
-    List<PrSnapshot> findByConversationIdAndFilePathLike(UUID conversationId, String filePathPattern);
+    List<PrSnapshot> findByRepoNameAndPrNumber(String repoName, Integer prNumber);
 
     /**
      * Delete snapshot by ID
@@ -76,21 +94,32 @@ public interface IPrSnapshotRepository {
     void deleteById(UUID id);
 
     /**
-     * Delete all snapshots for a conversation
+     * Delete all snapshots for a client
      *
-     * @param conversationId the conversation ID
+     * @param clientIdentifier the client identifier
      */
-    @Delete("DELETE FROM pr_snapshots WHERE conversation_id = #{conversationId, javaType=java.util.UUID, jdbcType=OTHER}")
-    void deleteByConversationId(UUID conversationId);
+    @Delete("DELETE FROM pr_snapshots WHERE client_identifier = #{clientIdentifier, javaType=java.util.UUID, jdbcType=OTHER}")
+    void deleteByClientIdentifier(UUID clientIdentifier);
 
     /**
-     * Count snapshots for a conversation
+     * Count snapshots for a client
      *
-     * @param conversationId the conversation ID
+     * @param clientIdentifier the client identifier
      * @return the count
      */
-    @Select("SELECT COUNT(*) FROM pr_snapshots WHERE conversation_id = #{conversationId, javaType=java.util.UUID, jdbcType=OTHER}")
-    long countByConversationId(UUID conversationId);
+    @Select("SELECT COUNT(*) FROM pr_snapshots WHERE client_identifier = #{clientIdentifier, javaType=java.util.UUID, jdbcType=OTHER}")
+    long countByClientIdentifier(UUID clientIdentifier);
+
+    /**
+     * Search snapshots by keyword for a given client
+     *
+     * @param clientIdentifier the client identifier
+     * @param keyword          the search keyword
+     * @return list of snapshots
+     */
+    @Select("SELECT id, url, client_identifier, repo_name, pr_number, branch, file_changes, created_at, updated_at " + "FROM pr_snapshots WHERE client_identifier = #{clientIdentifier, javaType=java.util.UUID, jdbcType=OTHER} " + "AND (repo_name ILIKE #{keyword, jdbcType=VARCHAR} OR branch ILIKE #{keyword, jdbcType=VARCHAR} OR url ILIKE #{keyword, jdbcType=VARCHAR}) " + "ORDER BY updated_at DESC")
+    @ResultMap("prSnapshotResultMap")
+    List<PrSnapshot> searchByKeyword(UUID clientIdentifier, String keyword);
 
     /**
      * Save or update a PR snapshot and return the saved object

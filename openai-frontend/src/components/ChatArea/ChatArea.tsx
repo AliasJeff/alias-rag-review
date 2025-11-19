@@ -38,7 +38,11 @@ export const ChatArea = ({
         onClearContext={onClearContext}
         prUrl={prUrl}
       />
-      <MessageList messages={messages} loading={loading} />
+      <MessageList
+        messages={messages}
+        loading={loading}
+        streaming={streaming}
+      />
       <InputBox
         onSend={onSendMessage}
         loading={loading || streaming}

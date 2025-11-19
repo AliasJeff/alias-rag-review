@@ -23,7 +23,7 @@ public class PrSnapshotService implements IPrSnapshotService {
 
     @Override
     public PrSnapshot createSnapshot(PrSnapshot snapshot) {
-        log.debug("Creating PR snapshot for conversation: {}, filePath: {}", snapshot.getConversationId(), snapshot.getFilePath());
+        log.debug("Creating PR snapshot for url: {}, client: {}", snapshot.getUrl(), snapshot.getClientIdentifier());
 
         if (snapshot.getId() == null) {
             snapshot.setId(UUID.randomUUID());
@@ -31,6 +31,10 @@ public class PrSnapshotService implements IPrSnapshotService {
 
         if (snapshot.getCreatedAt() == null) {
             snapshot.setCreatedAt(LocalDateTime.now());
+        }
+
+        if (snapshot.getUpdatedAt() == null) {
+            snapshot.setUpdatedAt(LocalDateTime.now());
         }
 
         return prSnapshotRepository.saveAndReturn(snapshot);
@@ -43,20 +47,27 @@ public class PrSnapshotService implements IPrSnapshotService {
     }
 
     @Override
-    public List<PrSnapshot> getSnapshotsByConversationId(UUID conversationId) {
-        log.debug("Getting all PR snapshots for conversation: {}", conversationId);
-        return prSnapshotRepository.findByConversationId(conversationId);
+    public List<PrSnapshot> getSnapshotsByClientIdentifier(UUID clientIdentifier) {
+        log.debug("Getting all PR snapshots for client: {}", clientIdentifier);
+        return prSnapshotRepository.findByClientIdentifier(clientIdentifier);
     }
 
     @Override
-    public PrSnapshot getSnapshotByConversationAndFilePath(UUID conversationId, String filePath) {
-        log.debug("Getting PR snapshot by conversation and file path: conversationId={}, filePath={}", conversationId, filePath);
-        return prSnapshotRepository.findByConversationIdAndFilePath(conversationId, filePath).orElse(null);
+    public PrSnapshot getSnapshotByUrl(String url) {
+        log.debug("Getting PR snapshot by url: {}", url);
+        return prSnapshotRepository.findByUrl(url).orElse(null);
+    }
+
+    @Override
+    public List<PrSnapshot> getSnapshotsByRepoNameAndPrNumber(String repoName, Integer prNumber) {
+        log.debug("Getting PR snapshots by repo: {}, prNumber: {}", repoName, prNumber);
+        return prSnapshotRepository.findByRepoNameAndPrNumber(repoName, prNumber);
     }
 
     @Override
     public PrSnapshot updateSnapshot(PrSnapshot snapshot) {
         log.info("Updating PR snapshot: {}", snapshot.getId());
+        snapshot.setUpdatedAt(LocalDateTime.now());
         return prSnapshotRepository.saveAndReturn(snapshot);
     }
 
@@ -67,14 +78,15 @@ public class PrSnapshotService implements IPrSnapshotService {
     }
 
     @Override
-    public void deleteSnapshotsByConversationId(UUID conversationId) {
-        log.info("Deleting all PR snapshots for conversation: {}", conversationId);
-        prSnapshotRepository.deleteByConversationId(conversationId);
+    public void deleteSnapshotsByClientIdentifier(UUID clientIdentifier) {
+        log.info("Deleting all PR snapshots for client: {}", clientIdentifier);
+        prSnapshotRepository.deleteByClientIdentifier(clientIdentifier);
     }
 
     @Override
-    public List<PrSnapshot> searchSnapshotsByFilePath(UUID conversationId, String filePathPattern) {
-        log.debug("Searching PR snapshots by file path pattern: conversationId={}, pattern={}", conversationId, filePathPattern);
-        return prSnapshotRepository.findByConversationIdAndFilePathLike(conversationId, filePathPattern);
+    public List<PrSnapshot> searchSnapshots(UUID clientIdentifier, String keyword) {
+        log.debug("Searching PR snapshots by client: {}, keyword={}", clientIdentifier, keyword);
+        String pattern = "%" + (keyword == null ? "" : keyword.trim()) + "%";
+        return prSnapshotRepository.searchByKeyword(clientIdentifier, pattern);
     }
 }

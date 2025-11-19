@@ -8,6 +8,13 @@ CREATE EXTENSION IF NOT EXISTS "pg_trgm";
 
 CREATE EXTENSION IF NOT EXISTS "vector";
 
+CREATE TABLE IF NOT EXISTS vector_store (
+    id uuid PRIMARY KEY,
+    content text,
+    metadata jsonb,
+    embedding vector(1024)
+);
+
 -- ===========================================================
 -- 客户端用户表（替代 user 表）
 -- 使用浏览器 localStorage 生成的 UUID 标识不同用户
@@ -52,7 +59,8 @@ CREATE TABLE IF NOT EXISTS messages (
     type VARCHAR(50) DEFAULT 'text',  -- text/code/analysis
     content TEXT NOT NULL,
     metadata JSONB DEFAULT '{}'::jsonb,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 
@@ -61,13 +69,16 @@ CREATE TABLE IF NOT EXISTS messages (
 -- ===========================================================
 CREATE TABLE IF NOT EXISTS pr_snapshots (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-    file_path TEXT NOT NULL,
-    diff TEXT,
-    content_before TEXT,
-    content_after TEXT,
-    metadata JSONB DEFAULT '{}'::jsonb,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    url TEXT NOT NULL,
+    client_identifier VARCHAR(255),
+    repo_name VARCHAR(255),
+    pr_number INT,
+    branch VARCHAR(255),
+
+    file_changes JSONB DEFAULT '{}'::jsonb,
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 

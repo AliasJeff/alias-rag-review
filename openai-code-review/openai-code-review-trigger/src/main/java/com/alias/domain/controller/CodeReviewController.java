@@ -4,6 +4,7 @@ import com.alias.config.AppConfig;
 import com.alias.domain.model.ModelEnum;
 import com.alias.domain.model.Response;
 import com.alias.domain.model.ReviewRequest;
+import com.alias.domain.service.IPrSnapshotService;
 import com.alias.domain.service.impl.ReviewPullRequestService;
 import com.alias.infrastructure.git.GitCommand;
 import io.swagger.v3.oas.annotations.Operation;
@@ -25,6 +26,9 @@ public class CodeReviewController {
 
     @Resource
     private ChatClient chatClient;
+
+    @Resource
+    private IPrSnapshotService prSnapshotService;
 
     /**
      * 执行PR代码审查
@@ -52,7 +56,7 @@ public class CodeReviewController {
             GitCommand gitCommand = new GitCommand(githubToken);
 
             // 创建服务并执行审查
-            ReviewPullRequestService reviewService = new ReviewPullRequestService(gitCommand, chatClient);
+            ReviewPullRequestService reviewService = new ReviewPullRequestService(gitCommand, chatClient, prSnapshotService);
 
             // 设置模型（如果指定）
             if (request.getModel() != null && !request.getModel().isEmpty()) {

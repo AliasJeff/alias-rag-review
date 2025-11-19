@@ -28,21 +28,29 @@ public interface IPrSnapshotService {
     PrSnapshot getSnapshotById(UUID snapshotId);
 
     /**
-     * Get all snapshots for a conversation
+     * Get all snapshots for a client
      *
-     * @param conversationId the conversation ID
+     * @param clientIdentifier the client identifier
      * @return list of snapshots
      */
-    List<PrSnapshot> getSnapshotsByConversationId(UUID conversationId);
+    List<PrSnapshot> getSnapshotsByClientIdentifier(UUID clientIdentifier);
 
     /**
-     * Get snapshot by conversation ID and file path
+     * Get snapshot by PR URL
      *
-     * @param conversationId the conversation ID
-     * @param filePath       the file path
+     * @param url the PR url
      * @return the snapshot or null if not found
      */
-    PrSnapshot getSnapshotByConversationAndFilePath(UUID conversationId, String filePath);
+    PrSnapshot getSnapshotByUrl(String url);
+
+    /**
+     * Get snapshots by repository and PR number
+     *
+     * @param repoName the repository name
+     * @param prNumber the PR number
+     * @return list of snapshots
+     */
+    List<PrSnapshot> getSnapshotsByRepoNameAndPrNumber(String repoName, Integer prNumber);
 
     /**
      * Update snapshot
@@ -60,18 +68,18 @@ public interface IPrSnapshotService {
     void deleteSnapshot(UUID snapshotId);
 
     /**
-     * Delete all snapshots for a conversation
+     * Delete all snapshots for a client
      *
-     * @param conversationId the conversation ID
+     * @param clientIdentifier the client identifier
      */
-    void deleteSnapshotsByConversationId(UUID conversationId);
+    void deleteSnapshotsByClientIdentifier(UUID clientIdentifier);
 
     /**
-     * Search snapshots by file path pattern
+     * Search snapshots by keyword (repo name / branch / url)
      *
-     * @param conversationId  the conversation ID
-     * @param filePathPattern the file path pattern
+     * @param clientIdentifier the client identifier
+     * @param keyword          the keyword for fuzzy search
      * @return list of matching snapshots
      */
-    List<PrSnapshot> searchSnapshotsByFilePath(UUID conversationId, String filePathPattern);
+    List<PrSnapshot> searchSnapshots(UUID clientIdentifier, String keyword);
 }

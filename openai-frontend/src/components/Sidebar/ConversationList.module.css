@@ -96,6 +96,15 @@
   text-overflow: ellipsis;
 }
 
+.itemRepo {
+  font-size: 12px;
+  color: #666;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .itemTime {
   font-size: 12px;
   color: #999;

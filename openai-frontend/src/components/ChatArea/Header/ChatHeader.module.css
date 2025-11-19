@@ -1,15 +1,16 @@
 .header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
   padding: 12px 16px;
   border-bottom: 1px solid #e0e0e0;
   background-color: #fafafa;
+  gap: 16px;
 }
 
 .status {
   font-size: 14px;
   color: #666;
+  flex: 1;
 }
 
 .ready {
@@ -26,9 +27,34 @@
   font-weight: 500;
 }
 
+.prInfo {
+  flex: 1;
+  text-align: center;
+  font-size: 13px;
+  color: #1a73e8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.prLink {
+  color: inherit;
+  text-decoration: none;
+}
+
+.prLink:hover {
+  text-decoration: underline;
+}
+
+.prPlaceholder {
+  color: #bbb;
+}
+
 .actions {
   display: flex;
+  justify-content: flex-end;
   gap: 8px;
+  flex: 1;
 }
 
 .stopButton,

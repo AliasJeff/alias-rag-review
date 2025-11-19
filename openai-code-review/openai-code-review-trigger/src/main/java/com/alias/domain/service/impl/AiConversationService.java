@@ -151,17 +151,12 @@ public class AiConversationService implements IAiConversationService {
 
             Prompt prompt = new Prompt(messages, OpenAiChatOptions.builder().model(request.getModel() != null ? request.getModel() : context.getModel()).build());
 
-            // Send initial message with conversation ID
-            String initData = "{\"conversationId\":\"" + context.getConversationId() + "\"}";
-            emitter.send(SseEmitter.event().id(context.getConversationId()).name("start").data(initData));
-
             // Call Spring AI ChatClient stream method
             StringBuilder fullResponse = new StringBuilder();
             chatClient.prompt(prompt).stream().content().doOnNext(chunk -> {
                 try {
                     fullResponse.append(chunk);
-                    String jsonData = "{\"content\":\"" + escapeJson(chunk) + "\",\"conversationId\":\"" + context.getConversationId() + "\"}";
-                    emitter.send(SseEmitter.event().id(UUID.randomUUID().toString()).name("message").data(jsonData));
+                    emitter.send(SseEmitter.event().id(UUID.randomUUID().toString()).name("message").data(buildEmitterPayload(chunk, context.getConversationId())));
                 } catch (IOException e) {
                     logger.error("Error sending stream chunk", e);
                 }
@@ -409,8 +404,7 @@ public class AiConversationService implements IAiConversationService {
                 fullResponse.append(chunkContent);
 
                 // SSE 发送当前块
-                String jsonData = "{\"content\":\"" + escapeJson(chunkContent) + "\",\"conversationId\":\"" + conversationId + "\"}";
-                emitter.send(SseEmitter.event().id(UUID.randomUUID().toString()).name("message").data(jsonData));
+                emitter.send(SseEmitter.event().id(UUID.randomUUID().toString()).name("message").data(buildEmitterPayload(chunkContent, conversationId)));
 
                 Thread.sleep(50);
                 i = endIndex;
@@ -486,6 +480,12 @@ public class AiConversationService implements IAiConversationService {
             return "";
         }
         return input.replace("\\", "\\\\").replace("\"", "\\\"").replace("\b", "\\b").replace("\f", "\\f").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t");
+    }
+
+    private String buildEmitterPayload(String content, String conversationId) {
+        String safeContent = content != null ? content : "";
+        String safeConversationId = conversationId != null ? conversationId : "";
+        return "{\"content\":\"" + escapeJson(safeContent) + "\",\"conversationId\":\"" + escapeJson(safeConversationId) + "\"}";
     }
 
     @Override

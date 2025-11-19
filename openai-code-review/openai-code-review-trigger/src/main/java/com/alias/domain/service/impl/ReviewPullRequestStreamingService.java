@@ -6,15 +6,15 @@ import com.alias.domain.prompt.ReviewPrompts;
 import com.alias.domain.service.AbstractOpenAiCodeReviewService;
 import com.alias.domain.utils.ChatUtils;
 import com.alias.infrastructure.git.GitCommand;
-import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.messages.UserMessage;
-import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.ai.openai.OpenAiChatOptions;
 import com.alias.utils.*;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
@@ -36,6 +36,7 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
     private String repository; // owner/repo
     private String prNumber;   // 数字字符串
     private String prUrl;      // PR URL
+    private String conversationId; // conversation identifier for SSE payloads
     private String model;      // 模型名称，默认使用 GPT-4o
 
     private ChatClient chatClient;
@@ -56,6 +57,10 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
 
     public void setPrUrl(String prUrl) {
         this.prUrl = prUrl;
+    }
+
+    public void setConversationId(String conversationId) {
+        this.conversationId = conversationId;
     }
 
     /**
@@ -110,7 +115,7 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
 
             // 记录审查结果（同步）
             // 注意：这里需要先完成流式审查，再记录结果
-            emitter.send(SseEmitter.event().name("complete").data("Review completed"));
+            emitter.send(SseEmitter.event().name("complete").data("Streaming completed"));
             emitter.complete();
 
             logger.info("Streaming PR review completed. prUrl={}", this.prUrl);
@@ -175,8 +180,7 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
 
         if (files.isEmpty()) {
             logger.warn("No files found in diff, returning empty review");
-            Map<String, Object> emptyReview = createEmptyReview();
-            emitter.send(SseEmitter.event().name("review").data(mapper.writeValueAsString(emptyReview)));
+            emitter.send(SseEmitter.event().name("review").data(buildEmitterPayload("No files found in diff, returning empty review\n")));
             return;
         }
 
@@ -188,19 +192,16 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
         List<JsonNode> allComments = new ArrayList<>();
 
         logger.info("Starting per-file streaming review. totalFiles={}", files.size());
+        emitter.send(SseEmitter.event().name("review_start").data(buildEmitterPayload("Starting per-file streaming review. totalFiles=" + files.size() + "\n")));
         for (int i = 0; i < files.size(); i++) {
             VCSUtils.FileChanges file = files.get(i);
             logger.info("Reviewing file {}/{}. path={}", i + 1, files.size(), file.path);
+            emitter.send(SseEmitter.event().name("file_start").data(buildEmitterPayload("Reviewing file " + i + "/" + files.size() + ". path=" + file.path + "\n")));
 
             try {
-                // 发送文件审查开始事件
-                Map<String, Object> fileStartEvent = new HashMap<>();
-                fileStartEvent.put("file", file.path);
-                fileStartEvent.put("progress", String.format("%d/%d", i + 1, files.size()));
-                emitter.send(SseEmitter.event().name("file_start").data(mapper.writeValueAsString(fileStartEvent)));
-
                 // 从 RAG 获取 context
                 String ragContext = getRagContext(safeDiff);
+                emitter.send(SseEmitter.event().name("rag_context_success").data(buildEmitterPayload("RAG context retrieved. contextSize=" + (ragContext != null ? ragContext.length() : 0) + "\n")));
 
                 // 对单个文件进行流式review
                 String fileReviewJson = reviewSingleFileStreaming(file, ragContext, MAX_PROMPT_CHARS, emitter);
@@ -239,12 +240,6 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
                     }
                 }
 
-                // 发送文件审查完成事件
-                Map<String, Object> fileCompleteEvent = new HashMap<>();
-                fileCompleteEvent.put("file", file.path);
-                fileCompleteEvent.put("score", score);
-                emitter.send(SseEmitter.event().name("file_complete").data(mapper.writeValueAsString(fileCompleteEvent)));
-
                 logger.info("Completed streaming review for file {}/{}. path={}, score={}", i + 1, files.size(), file.path, score);
             } catch (Exception e) {
                 logger.error("Failed to review file. path={}, err={}", file.path, e.toString(), e);
@@ -253,7 +248,7 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
                 fileErrorEvent.put("file", file.path);
                 fileErrorEvent.put("error", e.getMessage());
                 try {
-                    emitter.send(SseEmitter.event().name("file_error").data(mapper.writeValueAsString(fileErrorEvent)));
+                    emitter.send(SseEmitter.event().name("file_error").data(buildEmitterPayload("Error reviewing file " + i + "/" + files.size() + ". path=" + file.path + ". error=" + e.getMessage() + "\n")));
                 } catch (IOException ex) {
                     logger.error("Error sending file error event", ex);
                 }
@@ -279,9 +274,17 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
         mergedReview.put("comments", commentsList);
 
         // 发送最终审查结果
-        emitter.send(SseEmitter.event().name("review_summary").data(mapper.writeValueAsString(mergedReview)));
+        emitter.send(SseEmitter.event().name("review_summary").data(buildEmitterPayload("Completed streaming review.\n")));
+        emitter.send(SseEmitter.event().name("review_summary").data(buildEmitterPayload("Overall score: " + overallScore + "\n")));
+        emitter.send(SseEmitter.event().name("review_summary").data(buildEmitterPayload("Summary: " + combinedSummary + "\n")));
+        emitter.send(SseEmitter.event().name("review_summary").data(buildEmitterPayload("General review: " + "This review was generated by reviewing each file separately and merging the results." + "\n")));
+        emitter.send(SseEmitter.event().name("review_summary").data(buildEmitterPayload("Comments: " + commentsList.size() + "\n")));
+        for (Map<String, Object> comment : commentsList) {
+            emitter.send(SseEmitter.event().name("review_summary").data(buildEmitterPayload("Comment: " + comment.get("body") + "\n")));
+        }
 
         logger.info("Completed per-file streaming review. totalFiles={}, overallScore={}, totalComments={}", files.size(), overallScore, allComments.size());
+        emitter.send(SseEmitter.event().name("review_complete").data(buildEmitterPayload("Completed streaming review. totalFiles=" + files.size() + ", overallScore=" + overallScore + ", totalComments=" + allComments.size() + "\n")));
     }
 
     /**
@@ -323,16 +326,10 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
         // Call ChatClient with streaming
         StringBuilder fullResponse = new StringBuilder();
         chatClient.prompt(prompt).stream().content().doOnNext(chunk -> {
-            try {
-                fullResponse.append(chunk);
-                // 发送流式内容块
-                Map<String, Object> chunkEvent = new HashMap<>();
-                chunkEvent.put("file", file.path);
-                chunkEvent.put("chunk", chunk);
-                emitter.send(SseEmitter.event().name("review_chunk").data(mapper.writeValueAsString(chunkEvent)));
-            } catch (IOException e) {
-                logger.error("Error sending stream chunk for file: {}", file.path, e);
-            }
+            fullResponse.append(chunk);
+            // 发送流式内容块
+            // TODO 暂时注释
+            // emitter.send(SseEmitter.event().name("review_chunk").data(buildEmitterPayload(chunk)));
         }).blockLast();
 
         logger.debug("Review response for file: {}, contentSize={}", file.path, fullResponse.length());
@@ -350,6 +347,19 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
         review.put("general_review", "");
         review.put("comments", new ArrayList<>());
         return review;
+    }
+
+    private String buildEmitterPayload(String content) {
+        String safeContent = content != null ? content : "";
+        String safeConversationId = conversationId != null ? conversationId : "";
+        return "{\"content\":\"" + escapeJson(safeContent) + "\",\"conversationId\":\"" + escapeJson(safeConversationId) + "\"}";
+    }
+
+    private String escapeJson(String input) {
+        if (input == null) {
+            return "";
+        }
+        return input.replace("\\", "\\\\").replace("\"", "\\\"").replace("\b", "\\b").replace("\f", "\\f").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t");
     }
 
     @Override

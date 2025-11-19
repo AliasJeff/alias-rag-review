@@ -7,6 +7,7 @@ interface ChatHeaderProps {
   error?: string | null;
   onStopStream?: () => void;
   onClearContext?: () => void;
+  prUrl?: string;
 }
 
 /**
@@ -18,6 +19,7 @@ export const ChatHeader = ({
   error,
   onStopStream,
   onClearContext,
+  prUrl,
 }: ChatHeaderProps) => {
   return (
     <div className={styles.header}>
@@ -26,6 +28,23 @@ export const ChatHeader = ({
         {streaming && <span className={styles.streaming}>● 传输中...</span>}
         {error && <span className={styles.error}>● 错误: {error}</span>}
       </div>
+
+      <div className={styles.prInfo}>
+        {prUrl ? (
+          <a
+            href={prUrl}
+            target="_blank"
+            rel="noreferrer"
+            className={styles.prLink}
+            title={prUrl}
+          >
+            {prUrl}
+          </a>
+        ) : (
+          <span className={styles.prPlaceholder}>未关联 PR</span>
+        )}
+      </div>
+
       <div className={styles.actions}>
         {streaming && onStopStream && (
           <button onClick={onStopStream} className={styles.stopButton}>

@@ -15,6 +15,7 @@ interface ChatAreaProps {
   onStopStream?: () => void;
   onClearContext?: () => void;
   error?: string | null;
+  prUrl?: string;
 }
 
 export const ChatArea = ({
@@ -26,6 +27,7 @@ export const ChatArea = ({
   onStopStream,
   onClearContext,
   error,
+  prUrl,
 }: ChatAreaProps) => {
   return (
     <div className={styles.container}>
@@ -34,6 +36,7 @@ export const ChatArea = ({
         error={error}
         onStopStream={onStopStream}
         onClearContext={onClearContext}
+        prUrl={prUrl}
       />
       <MessageList messages={messages} loading={loading} />
       <InputBox

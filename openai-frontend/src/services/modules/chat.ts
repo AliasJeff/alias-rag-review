@@ -29,13 +29,16 @@ export const chatApi = {
     const baseUrl = process.env.NEXT_PUBLIC_API_URL;
 
     try {
-      const response = await fetch(`${baseUrl}/api/v1/ai-chat/chat-stream`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(request),
-      });
+      const response = await fetch(
+        `${baseUrl}/api/v1/ai-chat/chat-stream-router`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(request),
+        }
+      );
 
       if (!response.ok) {
         const error = `HTTP ${response.status}: ${response.statusText}`;

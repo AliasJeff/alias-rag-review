@@ -99,13 +99,13 @@ public class AiConversationController {
         try {
             // Validate request
             if (request.getMessage() == null || request.getMessage().isEmpty()) {
-                emitter.send(SseEmitter.event().name("error").data("Message is required"));
+                emitter.send(SseEmitter.event().name("error").data(buildEmitterPayload("Message is required", request != null ? request.getConversationId() : null)));
                 emitter.complete();
                 return emitter;
             }
 
             if (request.getUserId() == null || request.getUserId().isEmpty()) {
-                emitter.send(SseEmitter.event().name("error").data("User ID is required"));
+                emitter.send(SseEmitter.event().name("error").data(buildEmitterPayload("User ID is required", request.getConversationId())));
                 emitter.complete();
                 return emitter;
             }
@@ -127,7 +127,7 @@ public class AiConversationController {
                 } catch (Exception e) {
                     log.error("Stream chat failed", e);
                     try {
-                        emitter.send(SseEmitter.event().name("error").data("Stream chat failed: " + e.getMessage()));
+                        emitter.send(SseEmitter.event().name("error").data(buildEmitterPayload("Stream chat failed: " + e.getMessage(), requestForThread.getConversationId())));
                     } catch (Exception ex) {
                         log.error("Error sending error event", ex);
                     } finally {
@@ -147,7 +147,7 @@ public class AiConversationController {
         } catch (Exception e) {
             log.error("Stream chat setup failed", e);
             try {
-                emitter.send(SseEmitter.event().name("error").data("Stream setup failed: " + e.getMessage()));
+                emitter.send(SseEmitter.event().name("error").data(buildEmitterPayload("Stream setup failed: " + e.getMessage(), request.getConversationId())));
             } catch (Exception ex) {
                 log.error("Error sending error event", ex);
             } finally {
@@ -179,13 +179,13 @@ public class AiConversationController {
         try {
             // Validate request
             if (request.getMessage() == null || request.getMessage().isEmpty()) {
-                emitter.send(SseEmitter.event().name("error").data("Message is required"));
+                emitter.send(SseEmitter.event().name("error").data(buildEmitterPayload("Message is required", request != null ? request.getConversationId() : null)));
                 emitter.complete();
                 return emitter;
             }
 
             if (request.getUserId() == null || request.getUserId().isEmpty()) {
-                emitter.send(SseEmitter.event().name("error").data("User ID is required"));
+                emitter.send(SseEmitter.event().name("error").data(buildEmitterPayload("User ID is required", request.getConversationId())));
                 emitter.complete();
                 return emitter;
             }
@@ -210,13 +210,6 @@ public class AiConversationController {
                     // Detect user intent
                     ChatUtils.IntentType intent = ChatUtils.detectIntent(requestForThread.getMessage(), conversationHistory);
                     log.info("Detected intent: {} for conversationId={}", intent.getValue(), requestForThread.getConversationId());
-
-                    // Send intent event for client awareness
-                    try {
-                        emitter.send(SseEmitter.event().name("intent").data(intent.getValue()));
-                    } catch (IOException e) {
-                        log.warn("Failed to send intent event", e);
-                    }
 
                     // Route based on intent
                     if (intent == ChatUtils.IntentType.CODE_REVIEW || intent == ChatUtils.IntentType.REVIEW_FOLLOWUP) {
@@ -263,7 +256,7 @@ public class AiConversationController {
                             log.info("No PR URL found for review intent. conversationId={}", requestForThread.getConversationId());
                             try {
                                 String message = "为了提供更准确的代码审查，请提供 PR URL。";
-                                emitter.send(SseEmitter.event().name("message").data("{\"content\":\"" + escapeJson(message) + "\",\"conversationId\":\"" + requestForThread.getConversationId() + "\"}"));
+                                emitter.send(SseEmitter.event().name("message").data(buildEmitterPayload(message, requestForThread.getConversationId())));
                                 emitter.send(SseEmitter.event().name("complete").data("Streaming completed"));
                                 emitter.complete();
                                 return;
@@ -280,7 +273,7 @@ public class AiConversationController {
                                 log.info("Starting code review for PR. conversationId={}, prUrl={}", requestForThread.getConversationId(), prUrl);
 
                                 // Send review start event
-                                emitter.send(SseEmitter.event().name("review_start").data("{\"prUrl\":\"" + escapeJson(prUrl) + "\"}"));
+                                emitter.send(SseEmitter.event().name("review_start").data(buildEmitterPayload("Reviewing PR: " + prUrl + "\n", requestForThread.getConversationId())));
 
                                 // Get GitHub token from config
                                 String githubToken = AppConfig.getInstance().requireString("github", "token");
@@ -288,6 +281,7 @@ public class AiConversationController {
                                 // Create GitCommand and ReviewPullRequestStreamingService
                                 GitCommand gitCommand = new GitCommand(githubToken);
                                 ReviewPullRequestStreamingService reviewService = new ReviewPullRequestStreamingService(gitCommand, chatClient);
+                                reviewService.setConversationId(requestForThread.getConversationId());
 
                                 // Parse PR URL and set parameters
                                 GitHubPrUtils.PrInfo prInfo = GitHubPrUtils.parsePrUrl(prUrl);
@@ -302,7 +296,7 @@ public class AiConversationController {
                             } catch (Exception reviewErr) {
                                 log.error("Code review failed. conversationId={}, prUrl={}, error={}", requestForThread.getConversationId(), prUrl, reviewErr.getMessage(), reviewErr);
                                 try {
-                                    emitter.send(SseEmitter.event().name("error").data("Code review failed: " + reviewErr.getMessage()));
+                                    emitter.send(SseEmitter.event().name("error").data(buildEmitterPayload("Code review failed: " + reviewErr.getMessage(), requestForThread.getConversationId())));
                                 } catch (IOException ioErr) {
                                     log.error("Failed to send error event", ioErr);
                                 }
@@ -331,16 +325,6 @@ public class AiConversationController {
                                 requestForThread.setSystemPrompt(enhancedSystemPrompt);
                                 log.debug("Enhanced system prompt with RAG context");
                             }
-
-                            // Send RAG context event
-                            if (!ragContext.isEmpty()) {
-                                try {
-                                    String ragEvent = "{\"type\":\"rag_context\",\"size\":" + ragContext.length() + "}";
-                                    emitter.send(SseEmitter.event().name("rag_context").data(ragEvent));
-                                } catch (IOException e) {
-                                    log.warn("Failed to send RAG context event", e);
-                                }
-                            }
                         }
                     }
 
@@ -350,7 +334,7 @@ public class AiConversationController {
                 } catch (Exception e) {
                     log.error("Stream chat router failed", e);
                     try {
-                        emitter.send(SseEmitter.event().name("error").data("Stream chat failed: " + e.getMessage()));
+                        emitter.send(SseEmitter.event().name("error").data(buildEmitterPayload("Stream chat failed: " + e.getMessage(), requestForThread.getConversationId())));
                     } catch (Exception ex) {
                         log.error("Error sending error event", ex);
                     } finally {
@@ -370,7 +354,7 @@ public class AiConversationController {
         } catch (Exception e) {
             log.error("Stream chat router setup failed", e);
             try {
-                emitter.send(SseEmitter.event().name("error").data("Stream setup failed: " + e.getMessage()));
+                emitter.send(SseEmitter.event().name("error").data(buildEmitterPayload("Stream setup failed: " + e.getMessage(), request.getConversationId())));
             } catch (Exception ex) {
                 log.error("Error sending error event", ex);
             } finally {
@@ -536,5 +520,11 @@ public class AiConversationController {
             return "";
         }
         return input.replace("\\", "\\\\").replace("\"", "\\\"").replace("\b", "\\b").replace("\f", "\\f").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t");
+    }
+
+    private String buildEmitterPayload(String content, String conversationId) {
+        String safeContent = content != null ? content : "";
+        String safeConversationId = conversationId != null ? conversationId : "";
+        return "{\"content\":\"" + escapeJson(safeContent) + "\",\"conversationId\":\"" + escapeJson(safeConversationId) + "\"}";
     }
 }

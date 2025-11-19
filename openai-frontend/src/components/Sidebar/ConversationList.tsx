@@ -64,89 +64,91 @@ export const ConversationList = ({
         {!conversations || conversations.length === 0 ? (
           <div className={styles.empty}>暂无对话记录</div>
         ) : (
-          conversations.map((conv) => (
-            <div
-              key={conv.id}
-              className={`${styles.item} ${
-                activeId === conv.id ? styles.active : ""
-              }`}
-              onClick={() => onSelect(conv.id)}
-            >
-              <div className={styles.itemContent}>
-                {editingId === conv.id ? (
-                  <input
-                    type="text"
-                    value={editTitle}
-                    onChange={(e) => setEditTitle(e.target.value)}
-                    onBlur={() => handleEditSave(conv.id)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        handleEditSave(conv.id);
-                      }
-                    }}
-                    className={styles.editInput}
-                    autoFocus
-                  />
-                ) : (
-                  <>
-                    <div className={styles.itemTitle}>
-                      {conv.title || "无标题"}
-                    </div>
-                    {conv.status && (
-                      <div
-                        className={`${styles.itemStatus} ${
-                          styles[conv.status]
-                        }`}
-                      >
-                        {getStatusLabel(conv.status)}
+          conversations.map((conv) => {
+            const repoName = getRepoNameFromUrl(conv.prUrl);
+
+            return (
+              <div
+                key={conv.id}
+                className={`${styles.item} ${
+                  activeId === conv.id ? styles.active : ""
+                }`}
+                onClick={() => onSelect(conv.id)}
+              >
+                <div className={styles.itemContent}>
+                  {editingId === conv.id ? (
+                    <input
+                      type="text"
+                      value={editTitle}
+                      onChange={(e) => setEditTitle(e.target.value)}
+                      onBlur={() => handleEditSave(conv.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          handleEditSave(conv.id);
+                        }
+                      }}
+                      className={styles.editInput}
+                      autoFocus
+                    />
+                  ) : (
+                    <>
+                      <div className={styles.itemTitle}>
+                        {conv.title || "无标题"}
                       </div>
-                    )}
-                  </>
-                )}
-                <div className={styles.itemTime}>
-                  {new Date(conv.updatedAt).toLocaleDateString()}
+                      {repoName && (
+                        <div className={styles.itemRepo}>{repoName}</div>
+                      )}
+                    </>
+                  )}
+                  <div className={styles.itemTime}>
+                    {new Date(conv.updatedAt).toLocaleDateString()}
+                  </div>
+                </div>
+                <div className={styles.itemActions}>
+                  {editingId !== conv.id && (
+                    <>
+                      <button
+                        className={styles.editButton}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleEditStart(conv);
+                        }}
+                        title="编辑对话"
+                      >
+                        <Edit2 size={16} />
+                      </button>
+                      <button
+                        className={styles.deleteButton}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDelete(conv.id);
+                        }}
+                        title="删除对话"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
-              <div className={styles.itemActions}>
-                {editingId !== conv.id && (
-                  <>
-                    <button
-                      className={styles.editButton}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleEditStart(conv);
-                      }}
-                      title="编辑对话"
-                    >
-                      <Edit2 size={16} />
-                    </button>
-                    <button
-                      className={styles.deleteButton}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onDelete(conv.id);
-                      }}
-                      title="删除对话"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
     </div>
   );
 };
 
-function getStatusLabel(status: string): string {
-  const labels: Record<string, string> = {
-    active: "活跃",
-    closed: "已关闭",
-    archived: "已归档",
-    error: "错误",
-  };
-  return labels[status] || status;
+function getRepoNameFromUrl(prUrl?: string): string | null {
+  if (!prUrl) return null;
+  try {
+    const url = new URL(prUrl);
+    const parts = url.pathname.split("/").filter(Boolean);
+    if (parts.length >= 2) {
+      return `${parts[0]}/${parts[1]}`;
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }

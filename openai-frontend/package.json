@@ -19,7 +19,9 @@
     "react-dom": "19.2.0",
     "react-hot-toast": "^2.4.1",
     "react-markdown": "^10.1.0",
-    "rehype-highlight": "^7.0.2"
+    "react-scroll-to-bottom": "^4.2.0",
+    "rehype-highlight": "^7.0.2",
+    "remark-gfm": "^4.0.0"
   },
   "devDependencies": {
     "@types/node": "20.19.25",

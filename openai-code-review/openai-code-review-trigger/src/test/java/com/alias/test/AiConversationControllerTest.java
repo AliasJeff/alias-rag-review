@@ -3,12 +3,11 @@ package com.alias.test;
 import com.alias.domain.controller.AiConversationController;
 import com.alias.domain.model.ChatContext;
 import com.alias.domain.model.ChatRequest;
+import com.alias.domain.model.ChatResponse;
 import com.alias.domain.model.Response;
 import com.alias.domain.service.IAiConversationService;
-import com.alias.domain.service.impl.AiConversationService;
 import org.junit.Before;
 import org.junit.Test;
-import org.springframework.ai.chat.model.ChatResponse;
 
 import java.lang.reflect.Field;
 import java.util.UUID;

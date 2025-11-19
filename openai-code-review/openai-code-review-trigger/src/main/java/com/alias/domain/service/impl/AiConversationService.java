@@ -57,11 +57,20 @@ public class AiConversationService implements IAiConversationService {
         ChatMessage userMessage = ChatMessage.builder().id(UUID.randomUUID().toString()).role("user").content(request.getMessage()).createdAt(LocalDateTime.now()).build();
         context.addMessage(userMessage);
 
-        // Build prompt for Spring AI
-        String userMessageContent = request.getMessage();
-        Prompt prompt = new Prompt(
-                new UserMessage(userMessageContent), OpenAiChatOptions.builder().model(request.getModel() != null ? request.getModel() : context.getModel()).build()
-        );
+        // Build prompt with context using buildPrompts
+        List<ChatCompletionRequestDTO.Prompt> prompts = buildPrompts(context, request);
+        List<org.springframework.ai.chat.messages.Message> messages = new ArrayList<>();
+        for (ChatCompletionRequestDTO.Prompt p : prompts) {
+            if ("system".equals(p.getRole())) {
+                messages.add(new org.springframework.ai.chat.messages.SystemMessage(p.getContent()));
+            } else if ("user".equals(p.getRole())) {
+                messages.add(new org.springframework.ai.chat.messages.UserMessage(p.getContent()));
+            } else if ("assistant".equals(p.getRole())) {
+                messages.add(new org.springframework.ai.chat.messages.AssistantMessage(p.getContent()));
+            }
+        }
+
+        Prompt prompt = new Prompt(messages, OpenAiChatOptions.builder().model(request.getModel() != null ? request.getModel() : context.getModel()).build());
 
         // Call Spring AI ChatClient
         org.springframework.ai.chat.model.ChatResponse springResponse = chatClient.prompt(prompt).call().chatResponse();
@@ -127,21 +136,31 @@ public class AiConversationService implements IAiConversationService {
             ChatMessage userMessage = ChatMessage.builder().id(UUID.randomUUID().toString()).role("user").content(request.getMessage()).createdAt(LocalDateTime.now()).build();
             context.addMessage(userMessage);
 
-            // Build messages for API call
-            List<ChatCompletionRequestDTO.Prompt> messages = buildPrompts(context, request);
+            // Build prompt with context using buildPrompts
+            List<ChatCompletionRequestDTO.Prompt> prompts = buildPrompts(context, request);
+            List<org.springframework.ai.chat.messages.Message> messages = new ArrayList<>();
+            for (ChatCompletionRequestDTO.Prompt p : prompts) {
+                if ("system".equals(p.getRole())) {
+                    messages.add(new org.springframework.ai.chat.messages.SystemMessage(p.getContent()));
+                } else if ("user".equals(p.getRole())) {
+                    messages.add(new org.springframework.ai.chat.messages.UserMessage(p.getContent()));
+                } else if ("assistant".equals(p.getRole())) {
+                    messages.add(new org.springframework.ai.chat.messages.AssistantMessage(p.getContent()));
+                }
+            }
 
-            // Prepare request
-            ChatCompletionRequestDTO chatRequest = new ChatCompletionRequestDTO();
-            chatRequest.setModel(request.getModel() != null ? request.getModel() : context.getModel());
-            chatRequest.setMessages(messages);
+            Prompt prompt = new Prompt(messages, OpenAiChatOptions.builder().model(request.getModel() != null ? request.getModel() : context.getModel()).build());
 
-            // Send initial message with conversation ID
-            String initData = "{\"conversationId\":\"" + context.getConversationId() + "\"}";
-            emitter.send(SseEmitter.event().id(context.getConversationId()).name("start").data(initData));
-
-            // Call OpenAI API with streaming
+            // Call Spring AI ChatClient stream method
             StringBuilder fullResponse = new StringBuilder();
-            streamChatCompletion(chatRequest, emitter, context.getConversationId(), context, fullResponse);
+            chatClient.prompt(prompt).stream().content().doOnNext(chunk -> {
+                try {
+                    fullResponse.append(chunk);
+                    emitter.send(SseEmitter.event().id(UUID.randomUUID().toString()).name("message").data(buildEmitterPayload(chunk, context.getConversationId())));
+                } catch (IOException e) {
+                    logger.error("Error sending stream chunk", e);
+                }
+            }).blockLast();
 
             // Add assistant message to context
             ChatMessage assistantMessage = ChatMessage.builder().id(UUID.randomUUID().toString()).role("assistant").content(fullResponse.toString()).createdAt(LocalDateTime.now()).build();
@@ -385,8 +404,7 @@ public class AiConversationService implements IAiConversationService {
                 fullResponse.append(chunkContent);
 
                 // SSE 发送当前块
-                String jsonData = "{\"content\":\"" + escapeJson(chunkContent) + "\",\"conversationId\":\"" + conversationId + "\"}";
-                emitter.send(SseEmitter.event().id(UUID.randomUUID().toString()).name("message").data(jsonData));
+                emitter.send(SseEmitter.event().id(UUID.randomUUID().toString()).name("message").data(buildEmitterPayload(chunkContent, conversationId)));
 
                 Thread.sleep(50);
                 i = endIndex;
@@ -462,5 +480,31 @@ public class AiConversationService implements IAiConversationService {
             return "";
         }
         return input.replace("\\", "\\\\").replace("\"", "\\\"").replace("\b", "\\b").replace("\f", "\\f").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t");
+    }
+
+    private String buildEmitterPayload(String content, String conversationId) {
+        String safeContent = content != null ? content : "";
+        String safeConversationId = conversationId != null ? conversationId : "";
+        return "{\"content\":\"" + escapeJson(safeContent) + "\",\"conversationId\":\"" + escapeJson(safeConversationId) + "\"}";
+    }
+
+    @Override
+    public Conversation getConversationById(UUID conversationId) {
+        if (conversationId == null) {
+            return null;
+        }
+        return conversationService.getConversationById(conversationId);
+    }
+
+    @Override
+    public Conversation createConversation(Conversation conversation) {
+        logger.info("Creating conversation via AI service. conversationId={}", conversation.getId());
+        return conversationService.createConversation(conversation);
+    }
+
+    @Override
+    public Conversation updateConversation(Conversation conversation) {
+        logger.info("Updating conversation via AI service. conversationId={}", conversation.getId());
+        return conversationService.updateConversation(conversation);
     }
 }

@@ -6,13 +6,11 @@ import com.alias.domain.model.Response;
 import com.alias.domain.model.ReviewRequest;
 import com.alias.domain.service.impl.ReviewPullRequestService;
 import com.alias.infrastructure.git.GitCommand;
-import com.alias.infrastructure.openai.IOpenAI;
-import com.alias.infrastructure.openai.impl.OpenAI;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 /**
@@ -25,7 +23,7 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/v1/code-review")
 public class CodeReviewController {
 
-    @Autowired
+    @Resource
     private ChatClient chatClient;
 
     /**
@@ -52,10 +50,9 @@ public class CodeReviewController {
 
             // 创建依赖
             GitCommand gitCommand = new GitCommand(githubToken);
-            IOpenAI openAI = new OpenAI(chatClient);
 
             // 创建服务并执行审查
-            ReviewPullRequestService reviewService = new ReviewPullRequestService(gitCommand, openAI);
+            ReviewPullRequestService reviewService = new ReviewPullRequestService(gitCommand, chatClient);
 
             // 设置模型（如果指定）
             if (request.getModel() != null && !request.getModel().isEmpty()) {

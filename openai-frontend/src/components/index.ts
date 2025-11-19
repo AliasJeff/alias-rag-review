@@ -1,5 +1,5 @@
 export { Sidebar } from "./Sidebar/Sidebar";
-export { ChatArea } from "./ChatArea/ChatArea";
+export { ChatArea, MessageList, InputBox, ChatHeader } from "./ChatArea";
 export { ConfigDrawer } from "./ConfigDrawer/ConfigDrawer";
 export {
   ErrorBoundary,

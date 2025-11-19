@@ -6,15 +6,16 @@ import com.alias.domain.prompt.ReviewPrompts;
 import com.alias.domain.service.AbstractOpenAiCodeReviewService;
 import com.alias.domain.utils.ChatUtils;
 import com.alias.infrastructure.git.GitCommand;
-import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.messages.UserMessage;
-import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.ai.openai.OpenAiChatOptions;
 import com.alias.utils.*;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.openai.OpenAiChatOptions;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -23,19 +24,24 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 
-public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
+/**
+ * Streaming version of ReviewPullRequestService
+ * Supports SSE streaming for real-time PR review feedback
+ */
+public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewService {
 
-    private static final Logger logger = LoggerFactory.getLogger(ReviewPullRequestService.class);
+    private static final Logger logger = LoggerFactory.getLogger(ReviewPullRequestStreamingService.class);
 
     // PR 相关配置由调用方设置，不从环境变量读取
     private String repository; // owner/repo
     private String prNumber;   // 数字字符串
     private String prUrl;      // PR URL
+    private String conversationId; // conversation identifier for SSE payloads
     private String model;      // 模型名称，默认使用 GPT-4o
 
     private ChatClient chatClient;
 
-    public ReviewPullRequestService(GitCommand gitCommand, ChatClient chatClient) {
+    public ReviewPullRequestStreamingService(GitCommand gitCommand, ChatClient chatClient) {
         super(gitCommand, null);
         this.chatClient = chatClient;
         this.model = ModelEnum.GPT_4O.getCode(); // 默认模型
@@ -51,6 +57,10 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
 
     public void setPrUrl(String prUrl) {
         this.prUrl = prUrl;
+    }
+
+    public void setConversationId(String conversationId) {
+        this.conversationId = conversationId;
     }
 
     /**
@@ -88,6 +98,44 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
         this.exec();
     }
 
+    /**
+     * 流式执行 PR 审查
+     *
+     * @param emitter SSE 发射器
+     * @throws Exception 如果审查失败
+     */
+    public void execStreaming(SseEmitter emitter) throws Exception {
+        logger.info("Starting streaming PR review. prUrl={}", this.prUrl);
+        try {
+            // 获取 diff
+            String diffCode = getDiffCode();
+
+            // 流式进行代码审查
+            codeReviewStreaming(diffCode, emitter);
+
+            // 记录审查结果（同步）
+            // 注意：这里需要先完成流式审查，再记录结果
+            emitter.send(SseEmitter.event().name("complete").data("Streaming completed"));
+            emitter.complete();
+
+            logger.info("Streaming PR review completed. prUrl={}", this.prUrl);
+        } catch (IOException e) {
+            logger.error("Streaming error", e);
+            try {
+                emitter.completeWithError(e);
+            } catch (Exception ex) {
+                logger.error("Error sending error event", ex);
+            }
+        } catch (Exception e) {
+            logger.error("Unexpected error in streaming review", e);
+            try {
+                emitter.completeWithError(e);
+            } catch (Exception ex) {
+                logger.error("Error sending error event", ex);
+            }
+        }
+    }
+
     @Override
     protected String getDiffCode() throws IOException, InterruptedException {
         if (this.prUrl == null || this.prUrl.isEmpty()) {
@@ -104,8 +152,20 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
 
     @Override
     protected String codeReview(String diffCode) throws Exception {
-        logger.info("Submitting diff to LLM for review. model={}, diffSize={}", this.model != null ? this.model : ModelEnum.GPT_4O.getCode(), diffCode != null ? diffCode.length() : 0);
-        final int MAX_PROMPT_CHARS = 180_000; // 粗略上限，避免超出供应商限制
+        // 同步版本，不使用此方法
+        throw new UnsupportedOperationException("Use codeReviewStreaming instead");
+    }
+
+    /**
+     * 流式代码审查
+     *
+     * @param diffCode 代码差异
+     * @param emitter  SSE 发射器
+     * @throws Exception 如果审查失败
+     */
+    private void codeReviewStreaming(String diffCode, SseEmitter emitter) throws Exception {
+        logger.info("Submitting diff to LLM for streaming review. model={}, diffSize={}", this.model != null ? this.model : ModelEnum.GPT_4O.getCode(), diffCode != null ? diffCode.length() : 0);
+        final int MAX_PROMPT_CHARS = 180_000;
         String safeDiff = diffCode == null ? "" : diffCode;
         ObjectMapper mapper = new ObjectMapper();
 
@@ -115,32 +175,36 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
             files = VCSUtils.parseUnifiedDiff(safeDiff);
         } catch (Exception e) {
             logger.warn("Failed to parse unified diff; fallback to raw diff. err={}", e.toString());
-            files = new ArrayList<>(); // 空列表占位，避免 null
+            files = new ArrayList<>();
         }
 
         if (files.isEmpty()) {
             logger.warn("No files found in diff, returning empty review");
-            return mapper.writeValueAsString(createEmptyReview());
+            emitter.send(SseEmitter.event().name("review").data(buildEmitterPayload("No files found in diff, returning empty review\n")));
+            return;
         }
 
-        // 遍历每个文件，分别进行review
+        // 遍历每个文件，分别进行流式review
         List<JsonNode> fileReviews = new ArrayList<>();
         int totalScore = 0;
         int validScoreCount = 0;
         List<String> summaries = new ArrayList<>();
         List<JsonNode> allComments = new ArrayList<>();
 
-        logger.info("Starting per-file review. totalFiles={}", files.size());
+        logger.info("Starting per-file streaming review. totalFiles={}", files.size());
+        emitter.send(SseEmitter.event().name("review_start").data(buildEmitterPayload("Starting per-file streaming review. totalFiles=" + files.size() + "\n")));
         for (int i = 0; i < files.size(); i++) {
             VCSUtils.FileChanges file = files.get(i);
             logger.info("Reviewing file {}/{}. path={}", i + 1, files.size(), file.path);
+            emitter.send(SseEmitter.event().name("file_start").data(buildEmitterPayload("Reviewing file " + i + "/" + files.size() + ". path=" + file.path + "\n")));
 
             try {
-                // 从 RAG 获取 context（使用原始diff文本，因为RAG需要提取代码内容进行检索）
+                // 从 RAG 获取 context
                 String ragContext = getRagContext(safeDiff);
+                emitter.send(SseEmitter.event().name("rag_context_success").data(buildEmitterPayload("RAG context retrieved. contextSize=" + (ragContext != null ? ragContext.length() : 0) + "\n")));
 
-                // 对单个文件进行review
-                String fileReviewJson = reviewSingleFile(file, ragContext, MAX_PROMPT_CHARS);
+                // 对单个文件进行流式review
+                String fileReviewJson = reviewSingleFileStreaming(file, ragContext, MAX_PROMPT_CHARS, emitter);
 
                 // 解析单个文件的review结果
                 JsonNode fileReview;
@@ -176,10 +240,18 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
                     }
                 }
 
-                logger.info("Completed review for file {}/{}. path={}, score={}", i + 1, files.size(), file.path, score);
+                logger.info("Completed streaming review for file {}/{}. path={}, score={}", i + 1, files.size(), file.path, score);
             } catch (Exception e) {
                 logger.error("Failed to review file. path={}, err={}", file.path, e.toString(), e);
-                // 继续处理下一个文件，不中断整个流程
+                // 发送文件审查错误事件
+                Map<String, Object> fileErrorEvent = new HashMap<>();
+                fileErrorEvent.put("file", file.path);
+                fileErrorEvent.put("error", e.getMessage());
+                try {
+                    emitter.send(SseEmitter.event().name("file_error").data(buildEmitterPayload("Error reviewing file " + i + "/" + files.size() + ". path=" + file.path + ". error=" + e.getMessage() + "\n")));
+                } catch (IOException ex) {
+                    logger.error("Error sending file error event", ex);
+                }
             }
         }
 
@@ -187,7 +259,7 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
         int overallScore = validScoreCount > 0 ? totalScore / validScoreCount : 0;
         String combinedSummary = summaries.isEmpty() ? "No summary available." : String.join("\n\n", summaries);
 
-        // 将 JsonNode 列表转换为 Map 列表，确保正确序列化
+        // 将 JsonNode 列表转换为 Map 列表
         List<Map<String, Object>> commentsList = new ArrayList<>();
         for (JsonNode comment : allComments) {
             Map<String, Object> commentMap = mapper.convertValue(comment, Map.class);
@@ -201,21 +273,31 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
         mergedReview.put("general_review", "This review was generated by reviewing each file separately and merging the results.");
         mergedReview.put("comments", commentsList);
 
-        String finalResult = mapper.writeValueAsString(mergedReview);
-        logger.info("Completed per-file review. totalFiles={}, overallScore={}, totalComments={}", files.size(), overallScore, allComments.size());
-        return finalResult;
+        // 发送最终审查结果
+        emitter.send(SseEmitter.event().name("review_summary").data(buildEmitterPayload("Completed streaming review.\n")));
+        emitter.send(SseEmitter.event().name("review_summary").data(buildEmitterPayload("Overall score: " + overallScore + "\n")));
+        emitter.send(SseEmitter.event().name("review_summary").data(buildEmitterPayload("Summary: " + combinedSummary + "\n")));
+        emitter.send(SseEmitter.event().name("review_summary").data(buildEmitterPayload("General review: " + "This review was generated by reviewing each file separately and merging the results." + "\n")));
+        emitter.send(SseEmitter.event().name("review_summary").data(buildEmitterPayload("Comments: " + commentsList.size() + "\n")));
+        for (Map<String, Object> comment : commentsList) {
+            emitter.send(SseEmitter.event().name("review_summary").data(buildEmitterPayload("Comment: " + comment.get("body") + "\n")));
+        }
+
+        logger.info("Completed per-file streaming review. totalFiles={}, overallScore={}, totalComments={}", files.size(), overallScore, allComments.size());
+        emitter.send(SseEmitter.event().name("review_complete").data(buildEmitterPayload("Completed streaming review. totalFiles=" + files.size() + ", overallScore=" + overallScore + ", totalComments=" + allComments.size() + "\n")));
     }
 
     /**
-     * 对单个文件进行review
+     * 对单个文件进行流式review
      *
      * @param file           文件变更对象
      * @param ragContext     RAG上下文
      * @param maxPromptChars 最大prompt字符数限制
+     * @param emitter        SSE 发射器
      * @return review结果的JSON字符串
      * @throws Exception 如果review失败
      */
-    private String reviewSingleFile(VCSUtils.FileChanges file, String ragContext, int maxPromptChars) throws Exception {
+    private String reviewSingleFileStreaming(VCSUtils.FileChanges file, String ragContext, int maxPromptChars, SseEmitter emitter) throws Exception {
         ObjectMapper mapper = new ObjectMapper();
 
         // 将单个文件转换为JSON
@@ -241,13 +323,18 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
         // Create prompt with model options
         Prompt prompt = new Prompt(messages, OpenAiChatOptions.builder().model(this.model != null ? this.model : ModelEnum.GPT_4O.getCode()).build());
 
-        // Call ChatClient
-        org.springframework.ai.chat.model.ChatResponse response = chatClient.prompt(prompt).call().chatResponse();
-        String content = response.getResult().getOutput().getText();
+        // Call ChatClient with streaming
+        StringBuilder fullResponse = new StringBuilder();
+        chatClient.prompt(prompt).stream().content().doOnNext(chunk -> {
+            fullResponse.append(chunk);
+            // 发送流式内容块
+            // TODO 暂时注释
+            // emitter.send(SseEmitter.event().name("review_chunk").data(buildEmitterPayload(chunk)));
+        }).blockLast();
 
-        logger.debug("Review response for file: {}, contentSize={}", file.path, content != null ? content.length() : 0);
+        logger.debug("Review response for file: {}, contentSize={}", file.path, fullResponse.length());
 
-        return content;
+        return fullResponse.toString();
     }
 
     /**
@@ -262,10 +349,22 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
         return review;
     }
 
+    private String buildEmitterPayload(String content) {
+        String safeContent = content != null ? content : "";
+        String safeConversationId = conversationId != null ? conversationId : "";
+        return "{\"content\":\"" + escapeJson(safeContent) + "\",\"conversationId\":\"" + escapeJson(safeConversationId) + "\"}";
+    }
+
+    private String escapeJson(String input) {
+        if (input == null) {
+            return "";
+        }
+        return input.replace("\\", "\\\\").replace("\"", "\\\"").replace("\b", "\\b").replace("\f", "\\f").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t");
+    }
+
     @Override
     protected String recordCodeReview(String recommend) throws Exception {
         logger.info("Posting review to GitHub PR. repository={}, prNumber={}", this.repository, this.prNumber);
-        // Expect LLM to return JSON content as specified by prompt. Attempt to parse.
         ObjectMapper mapper = new ObjectMapper();
         String prUrl = "https://github.com/" + this.repository + "/pull/" + this.prNumber;
         JsonNode root;
@@ -290,9 +389,8 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
         // Inline comments
         JsonNode comments = root.get("comments");
         if (comments != null && comments.isArray() && comments.size() > 0) {
-            // 通过 GitHub API 获取 PR head commit SHA
             String commitSha = gitCommand.getPrHeadCommitSha(this.repository, this.prNumber);
-            List<RankedReviewComment> rankedComments = new ArrayList<>();
+            List<ReviewComment> rankedComments = new ArrayList<>();
             Iterator<JsonNode> it = comments.elements();
             int seq = 0;
             while (it.hasNext()) {
@@ -326,15 +424,15 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
                     fullBody = fullBody + "\n\n" + suggestion + "\n";
                 }
                 int rank = SeverityUtils.severityRank(severity);
-                rankedComments.add(new RankedReviewComment(new ReviewComment(path, "RIGHT", line, fullBody), rank, seq++));
+                rankedComments.add(new ReviewComment(new ReviewCommentDetail(path, "RIGHT", line, fullBody), rank, seq++));
             }
             if (!rankedComments.isEmpty()) {
                 rankedComments.sort((a, b) -> {
                     if (a.rank != b.rank) return Integer.compare(a.rank, b.rank);
                     return Integer.compare(a.index, b.index);
                 });
-                List<ReviewComment> ordered = new ArrayList<>();
-                for (RankedReviewComment rc : rankedComments) {
+                List<ReviewCommentDetail> ordered = new ArrayList<>();
+                for (ReviewComment rc : rankedComments) {
                     ordered.add(rc.comment);
                 }
                 createPullRequestReview(commitSha, "AI Code Review inline comments", ordered);
@@ -348,11 +446,8 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
         // TODO: not implemented
     }
 
-    // Removed file-based prompt loader; prompt is provided by ReviewPrompts class.
-
     /**
      * 从 RAG 服务获取代码上下文
-     * 调用 ChatUtils 中的 getRagContext 方法
      *
      * @param code 代码内容（原始diff文本）
      * @return RAG context 字符串
@@ -407,12 +502,11 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
             String errMsg = IoUtils.readStreamSafely(conn.getErrorStream());
             throw new RuntimeException("GitHub comment failed, code=" + code + ", err=" + errMsg);
         }
-        // 返回 PR 链接，便于日志打印
         logger.info("Comment posted to GitHub PR successfully. code={}, url=https://github.com/{}/pull/{}", code, repo, this.prNumber);
         return "https://github.com/" + repo + "/pull/" + this.prNumber;
     }
 
-    private void createPullRequestReview(String commitSha, String body, List<ReviewComment> comments) throws Exception {
+    private void createPullRequestReview(String commitSha, String body, List<ReviewCommentDetail> comments) throws Exception {
         String repo = this.repository;
         String token = AppConfig.getInstance().requireString("github", "token");
         if (repo == null || repo.isEmpty()) {
@@ -432,7 +526,7 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
         sb.append("\"event\":\"COMMENT\",");
         sb.append("\"comments\":[");
         for (int i = 0; i < comments.size(); i++) {
-            ReviewComment c = comments.get(i);
+            ReviewCommentDetail c = comments.get(i);
             sb.append("{").append("\"path\":").append(ReviewJsonUtils.toJsonString(c.path)).append(",").append("\"side\":").append(ReviewJsonUtils.toJsonString(c.side)).append(",").append("\"line\":").append(c.line).append(",").append("\"body\":").append(ReviewJsonUtils.toJsonString(c.body)).append("}");
             if (i < comments.size() - 1) sb.append(",");
         }
@@ -459,13 +553,13 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
         logger.info("PR review created successfully. code={}", code);
     }
 
-    private static final class ReviewComment {
+    private static final class ReviewCommentDetail {
         final String path;
         final String side; // "RIGHT" or "LEFT"
         final int line;
         final String body;
 
-        ReviewComment(String path, String side, int line, String body) {
+        ReviewCommentDetail(String path, String side, int line, String body) {
             this.path = path;
             this.side = side;
             this.line = line;
@@ -473,17 +567,15 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
         }
     }
 
-
-    private static final class RankedReviewComment {
-        final ReviewComment comment;
+    private static final class ReviewComment {
+        final ReviewCommentDetail comment;
         final int rank;
         final int index;
 
-        RankedReviewComment(ReviewComment comment, int rank, int index) {
+        ReviewComment(ReviewCommentDetail comment, int rank, int index) {
             this.comment = comment;
             this.rank = rank;
             this.index = index;
         }
     }
 }
-

@@ -42,6 +42,10 @@ export default function Home() {
     userId: clientUser?.clientIdentifier,
   });
 
+  const activeConversation = conversations.find(
+    (conv) => conv.id === activeConversationId
+  );
+
   const handleCreateConversation = async () => {
     try {
       const newConv = await createConversation("新对话");
@@ -159,6 +163,7 @@ export default function Home() {
             error={chatError}
             onStopStream={stopStream}
             onClearContext={clearContext}
+            prUrl={activeConversation?.prUrl}
           />
         </ChatAreaErrorBoundary>
       </div>

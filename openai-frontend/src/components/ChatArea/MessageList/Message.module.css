@@ -1,38 +1,3 @@
-.container {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  width: 100%;
-  background-color: #fff;
-  overflow-y: auto;
-}
-
-.empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  color: #999;
-}
-
-.emptyIcon {
-  font-size: 48px;
-  margin-bottom: 16px;
-}
-
-.emptyText {
-  font-size: 16px;
-  color: #999;
-}
-
-.messageList {
-  display: flex;
-  flex-direction: column;
-  padding: 16px;
-  gap: 12px;
-}
-
 .message {
   display: flex;
   gap: 12px;
@@ -90,7 +55,7 @@
 .text {
   font-size: 14px;
   line-height: 1.5;
-  white-space: pre-wrap;
+  /* white-space: pre-wrap; */
 }
 
 .time {
@@ -138,24 +103,6 @@
   background-color: rgba(255, 255, 255, 0.2);
 }
 
-.preBlock {
-  background-color: #f5f5f5;
-  padding: 12px;
-  border-radius: 6px;
-  overflow-x: auto;
-  margin: 8px 0;
-  font-size: 0.9em;
-}
-
-.user .preBlock {
-  background-color: rgba(0, 0, 0, 0.1);
-}
-
-.codeBlock {
-  font-family: "Courier New", monospace;
-  font-size: 0.9em;
-}
-
 .list,
 .orderedList {
   margin: 8px 0;
@@ -175,4 +122,76 @@
 
 .user .blockquote {
   border-left-color: rgba(255, 255, 255, 0.3);
+}
+
+/* Table styles */
+.tableWrapper {
+  overflow-x: auto;
+  margin: 12px 0;
+  border-radius: 6px;
+  border: 1px solid #ddd;
+}
+
+.user .tableWrapper {
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.tableHead {
+  background-color: #f0f0f0;
+}
+
+.user .tableHead {
+  background-color: rgba(0, 0, 0, 0.1);
+}
+
+.tableBody {
+  background-color: #fff;
+}
+
+.user .tableBody {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.tableRow {
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.user .tableRow {
+  border-bottom-color: rgba(255, 255, 255, 0.1);
+}
+
+.tableRow:last-child {
+  border-bottom: none;
+}
+
+.tableHeader,
+.tableCell {
+  padding: 10px 12px;
+  text-align: left;
+  border-right: 1px solid #e0e0e0;
+}
+
+.user .tableHeader,
+.user .tableCell {
+  border-right-color: rgba(255, 255, 255, 0.1);
+}
+
+.tableHeader:last-child,
+.tableCell:last-child {
+  border-right: none;
+}
+
+.tableHeader {
+  font-weight: 600;
+  color: #333;
+}
+
+.user .tableHeader {
+  color: #fff;
 }

@@ -3,18 +3,17 @@ package com.alias.rag.dev.tech.trigger.http;
 import com.alias.rag.dev.tech.api.IRAGRepoService;
 import com.alias.rag.dev.tech.api.dto.RagRepoDTO;
 import com.alias.rag.dev.tech.api.response.Response;
-import com.alias.rag.dev.tech.trigger.utils.GitUtils;
-import com.alias.rag.dev.tech.trigger.utils.RagUtils;
+import com.alias.rag.dev.tech.trigger.utils.RepositoryUtils;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import java.io.File;
 import java.io.IOException;
-import java.nio.file.*;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.List;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.io.FileUtils;
 import org.eclipse.jgit.api.Git;
-import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.*;
@@ -35,9 +34,7 @@ public class RAGRepoController implements IRAGRepoService {
   @Value("${repo.base-path}")
   private String repoBasePath;
 
-  @Resource private RagUtils ragUtils;
-
-  @Resource private GitUtils gitUtils;
+  @Resource private RepositoryUtils repositoryUtils;
 
   @RequestMapping(value = "register-repo", method = RequestMethod.POST)
   @Override
@@ -47,7 +44,7 @@ public class RAGRepoController implements IRAGRepoService {
     String branch = ragRepoDTO.getBranch();
 
     // 1. 提取仓库名，例如 chatgpt-framework
-    String repoName = GitUtils.extractProjectName(repoUrl);
+    String repoName = RepositoryUtils.extractProjectName(repoUrl);
 
     // 2. 确定仓库长期保存路径
     Path repoPath = Paths.get(repoBasePath, repoName);
@@ -77,11 +74,11 @@ public class RAGRepoController implements IRAGRepoService {
               .call();
 
       // 4. 全量构建向量库
-      ragUtils.indexRepositoryFiles(localDir.toPath(), repoName);
+      repositoryUtils.indexRepositoryFiles(localDir.toPath(), repoName);
 
       // 记录当前 HEAD commit
       String headCommit = git.getRepository().resolve("HEAD").name();
-      gitUtils.saveIndexedCommit(repoName, headCommit);
+      repositoryUtils.saveIndexedCommit(repoName, headCommit);
       log.info("Saved HEAD commit for {}: {}", repoName, headCommit);
 
       log.info("Repository registered successfully: {}", repoName);
@@ -105,35 +102,17 @@ public class RAGRepoController implements IRAGRepoService {
       return Response.<String>builder().code("4000").info("Repository name is required").build();
     }
 
-    Path repoPath = Paths.get(repoBasePath, repoName);
-    File localDir = repoPath.toFile();
-
-    if (!localDir.exists()) {
-      return Response.<String>builder()
-          .code("4001")
-          .info("Repository does not exist: " + repoName)
-          .build();
-    }
-
-    Git git = null;
     try {
-      git = Git.open(localDir);
-      Repository repository = git.getRepository();
+      // 1. 调用工具方法同步仓库（如果不存在会自动注册）
+      RepositoryUtils.SyncResult syncResult = repositoryUtils.syncRepository(ragRepoDTO);
+      if (syncResult == null) {
+        return Response.<String>builder().code("5000").info("Failed to sync repository").build();
+      }
 
-      // 1. 获取本地记录的 commit
-      String lastIndexedCommit = gitUtils.loadIndexedCommit(repoName);
-      log.info("Last indexed commit for {}: {}", repoName, lastIndexedCommit);
+      String currentCommit = syncResult.currentCommit;
 
-      // 2. pull 最新代码
-      git.pull()
-          .setCredentialsProvider(
-              new UsernamePasswordCredentialsProvider(githubUsername, githubToken))
-          .call();
-
-      String currentCommit = repository.resolve("HEAD").name();
-      log.info("Current HEAD commit for {}: {}", repoName, currentCommit);
-
-      if (currentCommit.equals(lastIndexedCommit)) {
+      // 2. 检查是否有变化
+      if (!syncResult.hasChanges) {
         return Response.<String>builder()
             .code("0002")
             .info("Repository is already up-to-date")
@@ -144,10 +123,17 @@ public class RAGRepoController implements IRAGRepoService {
       log.info("Changes detected, indexing updated files for {}", repoName);
 
       // 3. 找出新增或修改文件（简单策略：索引所有文件，也可改为 diff）
-      ragUtils.indexRepositoryFilesIncremental(repoPath, repoName, git);
+      Path repoPath = Paths.get(repoBasePath, repoName);
+      File localDir = repoPath.toFile();
+      Git git = Git.open(localDir);
+      try {
+        repositoryUtils.indexRepositoryFilesIncremental(repoPath, repoName, git);
+      } finally {
+        git.close();
+      }
 
       // 4. 更新 commit
-      gitUtils.saveIndexedCommit(repoName, currentCommit);
+      repositoryUtils.saveIndexedCommit(repoName, currentCommit);
 
       return Response.<String>builder()
           .code("0000")
@@ -158,8 +144,6 @@ public class RAGRepoController implements IRAGRepoService {
     } catch (Exception e) {
       log.error("Failed to sync repository {}: {}", repoName, e.getMessage());
       return Response.<String>builder().code("5000").info("Sync failed: " + e.getMessage()).build();
-    } finally {
-      if (git != null) git.close();
     }
   }
 
@@ -186,7 +170,7 @@ public class RAGRepoController implements IRAGRepoService {
       log.info("Deleted repository: {}", repoName);
 
       // 同时删除索引记录
-      ragUtils.deleteIndexedCommit(repoName);
+      repositoryUtils.deleteIndexedCommit(repoName);
       return Response.<String>builder()
           .code("0000")
           .info("Repository deleted successfully")
@@ -214,19 +198,18 @@ public class RAGRepoController implements IRAGRepoService {
       return Response.<String>builder().code("4000").info("Code is required").build();
     }
 
-    Path repoPath = Paths.get(repoBasePath, repoName);
-    File localDir = repoPath.toFile();
-
-    if (!localDir.exists()) {
-      return Response.<String>builder()
-          .code("4001")
-          .info("Repository does not exist: " + repoName)
-          .build();
-    }
-
     try {
-      // 简单示例：这里调用 ragUtils 做代码分析
-      String reviewResult = ragUtils.reviewCodeContext(repoName, code);
+      // 1. 先同步仓库代码（如果不存在会自动注册）
+      log.info("Syncing repository before code review: {}", repoName);
+      RepositoryUtils.SyncResult syncResult = repositoryUtils.syncRepository(ragRepoDTO);
+      if (syncResult == null) {
+        log.warn("Failed to sync repository {}, proceeding with code review anyway", repoName);
+      } else {
+        log.info("Repository synced successfully, current commit: {}", syncResult.currentCommit);
+      }
+
+      // 2. 执行代码分析
+      String reviewResult = repositoryUtils.reviewCodeContext(repoName, code);
 
       return Response.<String>builder()
           .code("0000")
@@ -264,8 +247,8 @@ public class RAGRepoController implements IRAGRepoService {
     }
 
     try {
-      // 简单示例：从 ragUtils 获取 tag 列表
-      List<String> tags = ragUtils.getRepositoryTags(repoName);
+      // 简单示例：从 repositoryUtils 获取 tag 列表
+      List<String> tags = repositoryUtils.getRepositoryTags(repoName);
 
       return Response.<List<String>>builder()
           .code("0000")

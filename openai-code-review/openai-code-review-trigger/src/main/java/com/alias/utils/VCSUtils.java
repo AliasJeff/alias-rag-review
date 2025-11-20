@@ -147,7 +147,10 @@ public class VCSUtils {
             if (line.startsWith(DIFF_FILE_PREFIX)) {
                 // flush previous file
                 if (inFile) {
-                    results.add(flushOne(currentBuffer, currentNewPath, currentOldPath));
+                    FileChanges fc = flushOne(currentBuffer, currentOldPath, currentNewPath);
+                    if (!isDeletedFile(fc)) {
+                        results.add(fc);
+                    }
                     currentBuffer = new StringBuilder();
                     currentOldPath = null;
                     currentNewPath = null;
@@ -196,6 +199,19 @@ public class VCSUtils {
             return p.substring(2);
         }
         return p;
+    }
+
+    /**
+     * 判断文件是否被删除
+     */
+    private static boolean isDeletedFile(FileChanges fc) {
+        // path 是 /dev/null 或 null → 删除文件
+        if (fc.path == null || "/dev/null".equals(fc.path)) {
+            return true;
+        }
+        // changes 全是删除行且没有新增/修改行
+        boolean hasAdditionsOrModifications = fc.changes.stream().anyMatch(change -> change.type != ChangeType.DELETE);
+        return !hasAdditionsOrModifications;
     }
 
     // ===== 数据结构 =====

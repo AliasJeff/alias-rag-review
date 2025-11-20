@@ -574,7 +574,7 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
     }
 
     @Override
-    protected void pushMessage(String logUrl) throws Exception {
+    protected void pushMessage(String logUrl) {
         // TODO: not implemented
     }
 
@@ -583,9 +583,8 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
      *
      * @param code 代码内容（原始diff文本）
      * @return RAG context 字符串
-     * @throws Exception 如果调用RAG接口失败
      */
-    private String getRagContext(String code) throws Exception {
+    private String getRagContext(String code) {
         if (this.repository == null || this.repository.isEmpty()) {
             logger.warn("Repository is empty, cannot get RAG context");
             return "";
@@ -644,7 +643,7 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
         if (repo == null || repo.isEmpty()) {
             throw new RuntimeException("GITHUB_REPOSITORY is empty");
         }
-        if (token == null || token.isEmpty()) {
+        if (token.isEmpty()) {
             throw new RuntimeException("GITHUB_TOKEN is empty");
         }
         if (this.prNumber == null || this.prNumber.isEmpty()) {

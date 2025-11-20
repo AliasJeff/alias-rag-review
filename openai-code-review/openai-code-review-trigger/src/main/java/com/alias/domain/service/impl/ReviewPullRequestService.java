@@ -143,11 +143,11 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
         // 获取 RAG context
         String ragContext = getRagContext(safeDiff);
 
-        // 步骤1: 先进行整体PR摘要
+        // 步骤1: 先进行整体PR摘要（一次性发送所有文件）
         logger.info("Starting PR overall summary. totalFiles={}", files.size());
         JsonNode prSummaryJson = null;
         try {
-            String prSummaryResponse = generatePrSummary(safeDiff, ragContext, MAX_PROMPT_CHARS);
+            String prSummaryResponse = generatePrSummary(files, ragContext, MAX_PROMPT_CHARS);
             try {
                 prSummaryJson = mapper.readTree(prSummaryResponse);
             } catch (Exception parseErr) {
@@ -285,25 +285,17 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
     /**
      * 生成PR整体摘要
      *
-     * @param diffCode       代码差异
+     * @param files          所有文件变更对象列表
      * @param ragContext     RAG上下文
      * @param maxPromptChars 最大prompt字符数限制
      * @return PR摘要的JSON字符串
      * @throws Exception 如果生成失败
      */
-    private String generatePrSummary(String diffCode, String ragContext, int maxPromptChars) throws Exception {
+    private String generatePrSummary(List<VCSUtils.FileChanges> files, String ragContext, int maxPromptChars) throws Exception {
         ObjectMapper mapper = new ObjectMapper();
 
         // 将所有文件转换为JSON
-        List<VCSUtils.FileChanges> allFilesList;
-        try {
-            allFilesList = VCSUtils.parseUnifiedDiff(diffCode);
-        } catch (Exception e) {
-            logger.warn("Failed to parse unified diff for summary; fallback to empty list. err={}", e.toString());
-            allFilesList = new ArrayList<>();
-        }
-
-        String structuredJson = mapper.writeValueAsString(allFilesList);
+        String structuredJson = mapper.writeValueAsString(files);
 
         String basePrompt = ReviewPrompts.PR_SUMMARY_PROMPT;
         // 将占位符替换为结构化 JSON 和 RAG context
@@ -313,7 +305,7 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
             logger.warn("Prompt too large for PR summary. promptSize={}, maxSize={}", mergedPrompt.length(), maxPromptChars);
         }
 
-        logger.debug("Request for PR summary");
+        logger.debug("Request for PR summary for {} files", files.size());
 
         // Build messages for ChatClient
         List<org.springframework.ai.chat.messages.Message> messages = new ArrayList<>();
@@ -326,7 +318,7 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
         org.springframework.ai.chat.model.ChatResponse response = chatClient.prompt(prompt).call().chatResponse();
         String content = response.getResult().getOutput().getText();
 
-        logger.debug("PR summary response. contentSize={}", content != null ? content.length() : 0);
+        logger.debug("PR summary response for {} files, contentSize={}", files.size(), content != null ? content.length() : 0);
 
         return content;
     }
@@ -410,8 +402,69 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
             if (description != null && !description.isEmpty()) {
                 topBuilder.append(description).append("\n\n");
             }
+
+            JsonNode keyChanges = prSummary.get("key_changes");
+            if (keyChanges != null && keyChanges.isArray() && keyChanges.size() > 0) {
+                topBuilder.append("#### Key Changes\n\n");
+                Iterator<JsonNode> keyChangeIterator = keyChanges.elements();
+                while (keyChangeIterator.hasNext()) {
+                    String change = keyChangeIterator.next().asText();
+                    if (change != null && !change.isEmpty()) {
+                        topBuilder.append("- ").append(change).append("\n");
+                    }
+                }
+                topBuilder.append("\n");
+            }
+
+            JsonNode reviewSummary = prSummary.get("review_summary");
+            if (reviewSummary != null && reviewSummary.isObject()) {
+                Integer totalFilesReviewed = ReviewJsonUtils.safeInt(reviewSummary, "total_files_reviewed");
+                Integer totalComments = ReviewJsonUtils.safeInt(reviewSummary, "total_comments");
+
+                if (totalFilesReviewed != null || totalComments != null) {
+                    topBuilder.append("#### Review Summary\n\n");
+                    if (totalFilesReviewed != null) {
+                        topBuilder.append("- Total Files Reviewed: ").append(totalFilesReviewed).append("\n");
+                    }
+                    if (totalComments != null) {
+                        topBuilder.append("- Total Comments: ").append(totalComments).append("\n");
+                    }
+                    topBuilder.append("\n");
+                }
+
+                JsonNode filesReviewed = reviewSummary.get("files");
+                if (filesReviewed != null && filesReviewed.isArray() && filesReviewed.size() > 0) {
+                    topBuilder.append("#### Files Reviewed\n\n");
+                    Iterator<JsonNode> filesIterator = filesReviewed.elements();
+                    int idx = 1;
+                    while (filesIterator.hasNext()) {
+                        JsonNode fileSummary = filesIterator.next();
+                        String filePath = ReviewJsonUtils.safeText(fileSummary, "file");
+                        String fileDescription = ReviewJsonUtils.safeText(fileSummary, "description");
+                        if (filePath == null && fileDescription == null) {
+                            continue;
+                        }
+                        topBuilder.append(idx++).append(". ");
+                        if (filePath != null) {
+                            topBuilder.append("`").append(filePath).append("`");
+                        }
+                        if (fileDescription != null) {
+                            if (filePath != null) {
+                                topBuilder.append(" — ");
+                            }
+                            topBuilder.append(fileDescription);
+                        }
+                        topBuilder.append("\n");
+                    }
+                    topBuilder.append("\n");
+                }
+            }
         }
-        String combinedTop = topBuilder.length() > 0 ? topBuilder.toString() : "AI Code Review completed.";
+        if (topBuilder.length() == 0) {
+            topBuilder.append("AI Code Review completed.\n\n");
+        }
+        topBuilder.append("---\n\nAuthor: '@AliasJeff'\n");
+        String combinedTop = topBuilder.toString();
         postCommentToGithubPr(combinedTop);
 
         // Inline comments

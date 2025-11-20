@@ -16,9 +16,6 @@ public final class ReviewPrompts {
             You are a senior code review expert. You will receive "structured PR change JSON" and "RAG context" from the knowledge base.
             Please conduct a comprehensive code review based on this structured change and the RAG context with the following requirements:
 
-            RAG Context (from knowledge base):
-            <RAG context>
-
             Provide comments for specific files and lines, only generate them when there are actual issues or improvement points.
             - Each comment must include a severity level (severity):
               * critical: Critical issues that must be fixed, otherwise will cause errors, security or performance risks;
@@ -60,17 +57,6 @@ public final class ReviewPrompts {
               ]
             }
 
-            Important notes:
-            - comments.line must be the line number in head (RIGHT), and must not fall on deleted (type=delete) lines; ensure it can be directly used with GitHub Reviews API.
-            - Only generate comments when code actually has issues or optimization points.
-            - Suggested code segments must be complete replacement content, not just fragment symbols.
-            - If you cannot determine the line number or file, skip that comment.
-            - Internal quotes in strings must be escaped as \\", and newlines should use \\n.
-
-            Input is structured PR change JSON (see structure above), please output according to the above JSON format, no additional text:
-            PR_DIFFS:
-            <Git diff>
-
             === Output Example ===
             {
               "comments": [
@@ -89,7 +75,22 @@ public final class ReviewPrompts {
                   "suggestion": "```suggestion\\n    <root level=\\"INFO\\">\\n```"
                 }
               ]
-            }""";
+            }
+
+            Important notes:
+            - comments.line must be the line number in head (RIGHT), and must not fall on deleted (type=delete) lines; ensure it can be directly used with GitHub Reviews API.
+            - Only generate comments when code actually has issues or optimization points.
+            - Suggested code segments must be complete replacement content, not just fragment symbols.
+            - If you cannot determine the line number or file, skip that comment.
+            - Internal quotes in strings must be escaped as \\", and newlines should use \\n.
+
+            Input is structured PR change JSON (see structure above), please output according to the above JSON format, no additional text:
+            PR_DIFFS:
+            <Git diff>
+
+            RAG Context (from knowledge base):
+            <RAG context>
+            """;
 
     /**
      * PR overall summary prompt that returns structured JSON with PR title, description,
@@ -99,16 +100,12 @@ public final class ReviewPrompts {
             You are a senior code review expert. You will receive "structured PR change JSON" and "RAG context" from the knowledge base.
             Please analyze the entire PR and provide a comprehensive summary with the following requirements:
 
-            RAG Context (from knowledge base):
-            <RAG context>
-
             Please analyze the entire PR and provide:
             1) A concise PR title that summarizes the main purpose of this PR
             2) A detailed description explaining what this PR does and why
             3) Key changes: a list of the most important changes in this PR (3-5 items)
             4) Review summary including:
                - Total number of files reviewed
-               - Total number of comments (can be 0 for now, will be filled after per-file review)
                - For each file, provide a brief description of what changed in that file
 
             Input data description (structured JSON, split by file):
@@ -130,7 +127,6 @@ public final class ReviewPrompts {
                 ],
                 "review_summary": {
                   "total_files_reviewed": number,
-                  "total_comments": 0,
                   "files": [
                     {
                       "file": "string, file relative path",
@@ -141,19 +137,6 @@ public final class ReviewPrompts {
                 }
               }
             }
-
-            Important notes:
-            - The title should be concise and descriptive (one line)
-            - The description should be comprehensive but not too verbose (2-4 sentences)
-            - Key changes should highlight the most important modifications (3-5 items)
-            - For each file, provide a brief description of what changed (1-2 sentences)
-            - Internal quotes in strings must be escaped as \\", and newlines should use \\n.
-            - total_comments should be set to 0 initially (will be updated after per-file review)
-
-            Input is structured PR change JSON (see structure above), please output according to the above JSON format, no additional text:
-            PR_DIFFS:
-            <Git diff>
-
             === Output Example ===
             {
               "pr_summary": {
@@ -166,7 +149,6 @@ public final class ReviewPrompts {
                 ],
                 "review_summary": {
                   "total_files_reviewed": 6,
-                  "total_comments": 0,
                   "files": [
                     {
                       "file": "ReviewPullRequestStreamingService.java",
@@ -179,7 +161,22 @@ public final class ReviewPrompts {
                   ]
                 }
               }
-            }""";
+            }
+
+            Important notes:
+            - The title should be concise and descriptive (one line)
+            - The description should be comprehensive but not too verbose (2-4 sentences)
+            - Key changes should highlight the most important modifications (3-5 items)
+            - For each file, provide a brief description of what changed (1-2 sentences)
+            - Internal quotes in strings must be escaped as \\", and newlines should use \\n.
+
+            Input is structured PR change JSON (see structure above), please output according to the above JSON format, no additional text:
+            PR_DIFFS:
+            <Git diff>
+
+            RAG Context (from knowledge base):
+            <RAG context>
+            """;
 
 }
 

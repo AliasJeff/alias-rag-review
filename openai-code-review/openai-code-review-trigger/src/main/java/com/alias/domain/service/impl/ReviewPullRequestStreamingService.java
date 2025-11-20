@@ -8,7 +8,6 @@ import com.alias.domain.prompt.ReviewPrompts;
 import com.alias.domain.service.AbstractOpenAiCodeReviewService;
 import com.alias.domain.service.IMessageService;
 import com.alias.domain.service.IPrSnapshotService;
-import com.alias.domain.utils.ChatUtils;
 import com.alias.infrastructure.git.GitCommand;
 import com.alias.utils.*;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -232,7 +231,8 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
 
         JsonNode prSummaryJson = null;
         try {
-            String prSummaryResponse = generatePrSummary(safeDiff, ragContext, MAX_PROMPT_CHARS);
+            // 一次性生成所有文件的PR摘要
+            String prSummaryResponse = generatePrSummary(files, ragContext, MAX_PROMPT_CHARS);
             try {
                 prSummaryJson = mapper.readTree(prSummaryResponse);
             } catch (Exception parseErr) {
@@ -268,6 +268,43 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
                     }
                     keyChangesMsg.append("\n");
                     emitter.send(SseEmitter.event().name("pr_summary").data(buildEmitterPayload(keyChangesMsg.toString())));
+                }
+
+                JsonNode reviewSummary = prSummary.get("review_summary");
+                if (reviewSummary != null && reviewSummary.isObject()) {
+                    Integer totalFilesReviewed = ReviewJsonUtils.safeInt(reviewSummary, "total_files_reviewed");
+
+                    StringBuilder summaryStats = new StringBuilder("### 📊 Review Summary\n\n");
+                    if (totalFilesReviewed != null) {
+                        summaryStats.append("- **Total Files Reviewed:** ").append(totalFilesReviewed).append("\n");
+                    }
+                    summaryStats.append("\n");
+                    emitter.send(SseEmitter.event().name("pr_summary").data(buildEmitterPayload(summaryStats.toString())));
+
+                    JsonNode filesReviewed = reviewSummary.get("files");
+                    if (filesReviewed != null && filesReviewed.isArray() && filesReviewed.size() > 0) {
+                        StringBuilder filesMsg = new StringBuilder("#### 📁 Files Reviewed\n\n");
+                        int fileIdx = 1;
+                        Iterator<JsonNode> filesIterator = filesReviewed.elements();
+                        while (filesIterator.hasNext()) {
+                            JsonNode fileSummary = filesIterator.next();
+                            String filePath = ReviewJsonUtils.safeText(fileSummary, "file");
+                            String fileDescription = ReviewJsonUtils.safeText(fileSummary, "description");
+                            if (filePath == null && fileDescription == null) {
+                                continue;
+                            }
+                            filesMsg.append(fileIdx++).append(". ");
+                            if (filePath != null) {
+                                filesMsg.append("`").append(filePath).append("`");
+                            }
+                            if (fileDescription != null) {
+                                filesMsg.append(" — ").append(fileDescription);
+                            }
+                            filesMsg.append("\n");
+                        }
+                        filesMsg.append("\n");
+                        emitter.send(SseEmitter.event().name("pr_summary").data(buildEmitterPayload(filesMsg.toString())));
+                    }
                 }
             }
 
@@ -439,35 +476,28 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
     /**
      * 生成PR整体摘要
      *
-     * @param diffCode       代码差异
+     * @param files          所有文件变更对象列表
      * @param ragContext     RAG上下文
      * @param maxPromptChars 最大prompt字符数限制
      * @return PR摘要的JSON字符串
      * @throws Exception 如果生成失败
      */
-    private String generatePrSummary(String diffCode, String ragContext, int maxPromptChars) throws Exception {
+    private String generatePrSummary(List<VCSUtils.FileChanges> files, String ragContext, int maxPromptChars) throws Exception {
         ObjectMapper mapper = new ObjectMapper();
 
         // 将所有文件转换为JSON
-        List<VCSUtils.FileChanges> allFilesList;
-        try {
-            allFilesList = VCSUtils.parseUnifiedDiff(diffCode);
-        } catch (Exception e) {
-            logger.warn("Failed to parse unified diff for summary; fallback to empty list. err={}", e.toString());
-            allFilesList = new ArrayList<>();
-        }
-
-        String structuredJson = mapper.writeValueAsString(allFilesList);
+        String structuredJson = mapper.writeValueAsString(files);
 
         String basePrompt = ReviewPrompts.PR_SUMMARY_PROMPT;
         // 将占位符替换为结构化 JSON 和 RAG context
-        String mergedPrompt = basePrompt.replace("<Git diff>", structuredJson).replace("<RAG context>", ragContext != null && !ragContext.isEmpty() ? ragContext : "No additional context available.");
+//        String mergedPrompt = basePrompt.replace("<Git diff>", structuredJson).replace("<RAG context>", ragContext != null && !ragContext.isEmpty() ? ragContext : "No additional context available.");
+        String mergedPrompt = basePrompt.replace("<Git diff>", structuredJson).replace("<RAG context>", "No additional context available.");
 
         if (mergedPrompt.length() > maxPromptChars) {
             logger.warn("Prompt too large for PR summary. promptSize={}, maxSize={}", mergedPrompt.length(), maxPromptChars);
         }
 
-        logger.debug("Request for PR summary");
+        logger.debug("Request for PR summary for {} files", files.size());
 
         // Build messages for ChatClient
         List<org.springframework.ai.chat.messages.Message> messages = new ArrayList<>();
@@ -480,7 +510,7 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
         org.springframework.ai.chat.model.ChatResponse response = chatClient.prompt(prompt).call().chatResponse();
         String content = response.getResult().getOutput().getText();
 
-        logger.debug("PR summary response. contentSize={}", content != null ? content.length() : 0);
+        logger.debug("PR summary response for {} files, contentSize={}", files.size(), content != null ? content.length() : 0);
 
         return content;
     }
@@ -583,8 +613,69 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
             if (description != null && !description.isEmpty()) {
                 topBuilder.append(description).append("\n\n");
             }
+
+            JsonNode keyChanges = prSummary.get("key_changes");
+            if (keyChanges != null && keyChanges.isArray() && keyChanges.size() > 0) {
+                topBuilder.append("#### Key Changes\n\n");
+                Iterator<JsonNode> keyChangeIterator = keyChanges.elements();
+                while (keyChangeIterator.hasNext()) {
+                    String change = keyChangeIterator.next().asText();
+                    if (change != null && !change.isEmpty()) {
+                        topBuilder.append("- ").append(change).append("\n");
+                    }
+                }
+                topBuilder.append("\n");
+            }
+
+            JsonNode reviewSummary = prSummary.get("review_summary");
+            if (reviewSummary != null && reviewSummary.isObject()) {
+                Integer totalFilesReviewed = ReviewJsonUtils.safeInt(reviewSummary, "total_files_reviewed");
+                Integer totalComments = ReviewJsonUtils.safeInt(reviewSummary, "total_comments");
+
+                if (totalFilesReviewed != null || totalComments != null) {
+                    topBuilder.append("#### Review Summary\n\n");
+                    if (totalFilesReviewed != null) {
+                        topBuilder.append("- Total Files Reviewed: ").append(totalFilesReviewed).append("\n");
+                    }
+                    if (totalComments != null) {
+                        topBuilder.append("- Total Comments: ").append(totalComments).append("\n");
+                    }
+                    topBuilder.append("\n");
+                }
+
+                JsonNode filesReviewed = reviewSummary.get("files");
+                if (filesReviewed != null && filesReviewed.isArray() && filesReviewed.size() > 0) {
+                    topBuilder.append("#### Files Reviewed\n\n");
+                    Iterator<JsonNode> filesIterator = filesReviewed.elements();
+                    int idx = 1;
+                    while (filesIterator.hasNext()) {
+                        JsonNode fileSummary = filesIterator.next();
+                        String filePath = ReviewJsonUtils.safeText(fileSummary, "file");
+                        String fileDescription = ReviewJsonUtils.safeText(fileSummary, "description");
+                        if (filePath == null && fileDescription == null) {
+                            continue;
+                        }
+                        topBuilder.append(idx++).append(". ");
+                        if (filePath != null) {
+                            topBuilder.append("`").append(filePath).append("`");
+                        }
+                        if (fileDescription != null) {
+                            if (filePath != null) {
+                                topBuilder.append(" — ");
+                            }
+                            topBuilder.append(fileDescription);
+                        }
+                        topBuilder.append("\n");
+                    }
+                    topBuilder.append("\n");
+                }
+            }
         }
-        String combinedTop = topBuilder.length() > 0 ? topBuilder.toString() : "AI Code Review completed.";
+        if (topBuilder.length() == 0) {
+            topBuilder.append("AI Code Review completed.\n\n");
+        }
+        topBuilder.append("---\n\nAuthor: '@AliasJeff'\n");
+        String combinedTop = topBuilder.toString();
         postCommentToGithubPr(combinedTop);
 
         // Inline comments
@@ -681,18 +772,20 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
      * @return RAG context 字符串
      */
     private String getRagContext(String code) {
-        if (this.repository == null || this.repository.isEmpty()) {
-            logger.warn("Repository is empty, cannot get RAG context");
-            return "";
-        }
-
-        logger.info("Getting RAG context via ChatUtils. repository={}, codeSize={}", this.repository, code != null ? code.length() : 0);
-
-        // 调用 ChatUtils 中的 getRagContext 方法
-        String ragContext = ChatUtils.getRagContext(code, this.repository);
-
-        logger.info("RAG context retrieved. contextSize={}", ragContext.length());
-        return ragContext;
+        // TODO: 启用 getRagContext
+        return "";
+//        if (this.repository == null || this.repository.isEmpty()) {
+//            logger.warn("Repository is empty, cannot get RAG context");
+//            return "";
+//        }
+//
+//        logger.info("Getting RAG context via ChatUtils. repository={}, codeSize={}", this.repository, code != null ? code.length() : 0);
+//
+//        // 调用 ChatUtils 中的 getRagContext 方法
+//        String ragContext = ChatUtils.getRagContext(code, this.repository);
+//
+//        logger.info("RAG context retrieved. contextSize={}", ragContext.length());
+//        return ragContext;
     }
 
     private String postCommentToGithubPr(String body) throws Exception {

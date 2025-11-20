@@ -9,8 +9,8 @@ public final class ReviewPrompts {
     }
 
     /**
-     * Copilot-style PR review that returns strict JSON with an overall score,
-     * summary, and selective inline comments with severity and optional suggestions.
+     * Copilot-style PR review that returns strict JSON with selective inline comments
+     * with severity and optional suggestions.
      */
     public static final String PR_REVIEW_PROMPT = """
             You are a senior code review expert. You will receive "structured PR change JSON" and "RAG context" from the knowledge base.
@@ -19,21 +19,19 @@ public final class ReviewPrompts {
             RAG Context (from knowledge base):
             <RAG context>
 
-            1) Give the entire PR an overall score (overall_score), an integer from 0~100, representing code quality and risk. Higher scores indicate better quality.
-            2) Provide a PR change summary (summary), highlighting modules, files, functional points, major interface/data structure changes, and potential impacts.
-            3) Provide comments for specific files and lines, only generate them when there are actual issues or improvement points.
-               - Each comment must include a severity level (severity):
-                 * critical: Critical issues that must be fixed, otherwise will cause errors, security or performance risks;
-                 * major: Important issues that should be fixed, otherwise will affect maintainability, logic or edge conditions;
-                 * minor: Minor issues such as naming, comments, style, etc.;
-                 * suggestion: Non-issue suggestions, such as optimizable code patterns or structures;
-               - It is recommended to provide modification suggestions, giving complete code segments that can be directly replaced (minimum viable scope).
-               - The complete replacement code block format should match GitHub Suggested Change, for example:
-                 ```suggestion
-                    public void foo() {
-                        System.out.println("Hello, world!");
-                    }
-                 ```
+            Provide comments for specific files and lines, only generate them when there are actual issues or improvement points.
+            - Each comment must include a severity level (severity):
+              * critical: Critical issues that must be fixed, otherwise will cause errors, security or performance risks;
+              * major: Important issues that should be fixed, otherwise will affect maintainability, logic or edge conditions;
+              * minor: Minor issues such as naming, comments, style, etc.;
+              * suggestion: Non-issue suggestions, such as optimizable code patterns or structures;
+            - It is recommended to provide modification suggestions, giving complete code segments that can be directly replaced (minimum viable scope).
+            - The complete replacement code block format should match GitHub Suggested Change, for example:
+              ```suggestion
+                 public void foo() {
+                     System.out.println("Hello, world!");
+                 }
+              ```
             Input data description (structured JSON, split by file):
             - Each file element contains:
               { "path": string, "oldPath": string|null, "changes": [
@@ -51,8 +49,6 @@ public final class ReviewPrompts {
 
             Output strict JSON with the following fields (UTF-8, no extra fields, no Markdown code block fences):
             {
-              "overall_score": number, // Integer score from 0~100
-              "summary": "string, PR change summary, keep it concise",
               "comments": [
                 {
                   "path": "string, file relative path (relative to repository root)",
@@ -69,7 +65,6 @@ public final class ReviewPrompts {
             - Only generate comments when code actually has issues or optimization points.
             - Suggested code segments must be complete replacement content, not just fragment symbols.
             - If you cannot determine the line number or file, skip that comment.
-            - overall_score is an integer from 0~100, where 100 indicates best code quality and 0 indicates serious problems.
             - Internal quotes in strings must be escaped as \\", and newlines should use \\n.
 
             Input is structured PR change JSON (see structure above), please output according to the above JSON format, no additional text:
@@ -78,8 +73,6 @@ public final class ReviewPrompts {
 
             === Output Example ===
             {
-              "overall_score": 88,
-              "summary": "This PR refactors GitCommand utilities, centralizes prompt definitions, and improves logging and JSON handling. The changes enhance maintainability and modularization.",
               "comments": [
                 {
                   "path": "openai-code-review/openai-code-review-sdk/src/main/java/com/alias/middleware/sdk/domain/service/impl/ReviewPullRequestService.java",
@@ -96,6 +89,96 @@ public final class ReviewPrompts {
                   "suggestion": "```suggestion\\n    <root level=\\"INFO\\">\\n```"
                 }
               ]
+            }""";
+
+    /**
+     * PR overall summary prompt that returns structured JSON with PR title, description,
+     * key changes, and review summary including file-level descriptions.
+     */
+    public static final String PR_SUMMARY_PROMPT = """
+            You are a senior code review expert. You will receive "structured PR change JSON" and "RAG context" from the knowledge base.
+            Please analyze the entire PR and provide a comprehensive summary with the following requirements:
+
+            RAG Context (from knowledge base):
+            <RAG context>
+
+            Please analyze the entire PR and provide:
+            1) A concise PR title that summarizes the main purpose of this PR
+            2) A detailed description explaining what this PR does and why
+            3) Key changes: a list of the most important changes in this PR (3-5 items)
+            4) Review summary including:
+               - Total number of files reviewed
+               - Total number of comments (can be 0 for now, will be filled after per-file review)
+               - For each file, provide a brief description of what changed in that file
+
+            Input data description (structured JSON, split by file):
+            - Each file element contains:
+              { "path": string, "oldPath": string|null, "changes": [
+                  { "type": "add"|"delete", "oldLine": number|null, "newLine": number|null, "content": string }
+                ], "context": { "oldText": string, "newText": string }, "linesChanged": number }
+            - The RAG context provides additional information from the knowledge base that may help you understand the codebase better.
+
+            Output strict JSON with the following structure (UTF-8, no extra fields, no Markdown code block fences):
+            {
+              "pr_summary": {
+                "title": "string, concise PR title",
+                "description": "string, detailed description of what this PR does and why",
+                "key_changes": [
+                  "string, key change 1",
+                  "string, key change 2",
+                  ...
+                ],
+                "review_summary": {
+                  "total_files_reviewed": number,
+                  "total_comments": 0,
+                  "files": [
+                    {
+                      "file": "string, file relative path",
+                      "description": "string, brief description of changes in this file"
+                    },
+                    ...
+                  ]
+                }
+              }
+            }
+
+            Important notes:
+            - The title should be concise and descriptive (one line)
+            - The description should be comprehensive but not too verbose (2-4 sentences)
+            - Key changes should highlight the most important modifications (3-5 items)
+            - For each file, provide a brief description of what changed (1-2 sentences)
+            - Internal quotes in strings must be escaped as \\", and newlines should use \\n.
+            - total_comments should be set to 0 initially (will be updated after per-file review)
+
+            Input is structured PR change JSON (see structure above), please output according to the above JSON format, no additional text:
+            PR_DIFFS:
+            <Git diff>
+
+            === Output Example ===
+            {
+              "pr_summary": {
+                "title": "Refactor RAG Service Architecture",
+                "description": "This PR refactors the RAG (Retrieval-Augmented Generation) service architecture by extracting utility methods into a proper service implementation, modernizing code patterns, and cleaning up the codebase.",
+                "key_changes": [
+                  "Extracted RepositoryUtils into RAGServiceImpl implementing the IRAGService interface for better separation of concerns",
+                  "Removed redundant null checks and error handling methods (parseUuidQuietly, extractRepositoryFromRequest)",
+                  "Modernized Java syntax with diamond operator usage and simplified SSE emitter configuration"
+                ],
+                "review_summary": {
+                  "total_files_reviewed": 6,
+                  "total_comments": 0,
+                  "files": [
+                    {
+                      "file": "ReviewPullRequestStreamingService.java",
+                      "description": "Applied diamond operator to TypeReference for cleaner syntax"
+                    },
+                    {
+                      "file": "AiConversationController.java",
+                      "description": "Simplified null checks, changed SSE timeout to infinite, replaced safe UUID parsing with direct conversion, removed unused helper methods"
+                    }
+                  ]
+                }
+              }
             }""";
 
 }

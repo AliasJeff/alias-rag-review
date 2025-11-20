@@ -220,19 +220,71 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
 
         persistSnapshotAsync(files);
 
-        // 遍历每个文件，分别进行流式review
+        // 获取 RAG context
+        String ragContext = getRagContext(safeDiff);
+        String ragMsg = "🧠 **RAG Context Loaded** (Size: " + (ragContext != null ? ragContext.length() : 0) + " characters)\n\n";
+        emitter.send(SseEmitter.event().name("rag_context_success").data(buildEmitterPayload(ragMsg)));
+
+        // 步骤1: 先进行整体PR摘要
+        logger.info("Starting PR overall summary. totalFiles={}", files.size());
+        String summaryStartMsg = "### 📋 Generating PR Summary\n\n" + "Analyzing overall PR changes...\n\n";
+        emitter.send(SseEmitter.event().name("pr_summary_start").data(buildEmitterPayload(summaryStartMsg)));
+
+        JsonNode prSummaryJson = null;
+        try {
+            String prSummaryResponse = generatePrSummary(safeDiff, ragContext, MAX_PROMPT_CHARS);
+            try {
+                prSummaryJson = mapper.readTree(prSummaryResponse);
+            } catch (Exception parseErr) {
+                logger.warn("Failed to parse PR summary JSON, attempting to extract. err={}", parseErr.toString());
+                String cleaned = ReviewJsonUtils.extractJsonPayload(prSummaryResponse);
+                prSummaryJson = mapper.readTree(cleaned);
+            }
+
+            // 发送PR摘要信息
+            JsonNode prSummary = prSummaryJson.get("pr_summary");
+            if (prSummary != null) {
+                String title = ReviewJsonUtils.safeText(prSummary, "title");
+                String description = ReviewJsonUtils.safeText(prSummary, "description");
+
+                if (title != null && !title.isEmpty()) {
+                    String titleMsg = "### 📌 PR Title\n\n**" + title + "**\n\n";
+                    emitter.send(SseEmitter.event().name("pr_summary").data(buildEmitterPayload(titleMsg)));
+                }
+
+                if (description != null && !description.isEmpty()) {
+                    String descMsg = "### 📝 PR Description\n\n" + description + "\n\n";
+                    emitter.send(SseEmitter.event().name("pr_summary").data(buildEmitterPayload(descMsg)));
+                }
+
+                JsonNode keyChanges = prSummary.get("key_changes");
+                if (keyChanges != null && keyChanges.isArray()) {
+                    StringBuilder keyChangesMsg = new StringBuilder("### 🔑 Key Changes\n\n");
+                    Iterator<JsonNode> it = keyChanges.elements();
+                    int idx = 1;
+                    while (it.hasNext()) {
+                        String change = it.next().asText();
+                        keyChangesMsg.append(idx++).append(". ").append(change).append("\n");
+                    }
+                    keyChangesMsg.append("\n");
+                    emitter.send(SseEmitter.event().name("pr_summary").data(buildEmitterPayload(keyChangesMsg.toString())));
+                }
+            }
+
+            logger.info("PR summary generated successfully");
+        } catch (Exception e) {
+            logger.error("Failed to generate PR summary, continuing with per-file review. err={}", e.toString(), e);
+            String errorMsg = "⚠️ **PR Summary Generation Failed**\n\nContinuing with per-file review...\n\n";
+            emitter.send(SseEmitter.event().name("pr_summary_error").data(buildEmitterPayload(errorMsg)));
+        }
+
+        // 步骤2: 遍历每个文件，分别进行流式review
         List<JsonNode> fileReviews = new ArrayList<>();
-        int totalScore = 0;
-        int validScoreCount = 0;
-        List<String> summaries = new ArrayList<>();
         List<JsonNode> allComments = new ArrayList<>();
 
         logger.info("Starting per-file streaming review. totalFiles={}", files.size());
         String startMsg = "### 📄 Starting Per-File Review\n\n" + "**Total Files:** " + files.size() + "\n\n";
         emitter.send(SseEmitter.event().name("review_start").data(buildEmitterPayload(startMsg)));
-        String ragContext = getRagContext(safeDiff);
-        String ragMsg = "🧠 **RAG Context Loaded** (Size: " + (ragContext != null ? ragContext.length() : 0) + " characters)\n\n";
-        emitter.send(SseEmitter.event().name("rag_context_success").data(buildEmitterPayload(ragMsg)));
         for (int i = 0; i < files.size(); i++) {
             VCSUtils.FileChanges file = files.get(i);
             logger.info("Reviewing file {}/{}. path={}", i + 1, files.size(), file.path);
@@ -241,8 +293,6 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
             emitter.send(SseEmitter.event().name("file_start").data(buildEmitterPayload(fileStartMsg)));
 
             try {
-                // 从 RAG 获取 context
-
                 // 对单个文件进行流式review
                 String fileReviewJson = reviewSingleFileStreaming(file, ragContext, MAX_PROMPT_CHARS, emitter);
 
@@ -258,19 +308,6 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
 
                 fileReviews.add(fileReview);
 
-                // 提取score
-                Integer score = ReviewJsonUtils.safeInt(fileReview, "overall_score");
-                if (score != null) {
-                    totalScore += score;
-                    validScoreCount++;
-                }
-
-                // 提取summary
-                String summary = ReviewJsonUtils.safeText(fileReview, "summary");
-                if (summary != null && !summary.isEmpty()) {
-                    summaries.add(String.format("[%s] %s", displayPath, summary));
-                }
-
                 // 提取comments
                 JsonNode comments = fileReview.get("comments");
                 if (comments != null && comments.isArray()) {
@@ -280,7 +317,7 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
                     }
                 }
 
-                logger.info("Completed streaming review for file {}/{}. path={}, score={}", i + 1, files.size(), file.path, score);
+                logger.info("Completed streaming review for file {}/{}. path={}, comments={}", i + 1, files.size(), file.path, comments != null && comments.isArray() ? comments.size() : 0);
             } catch (Exception e) {
                 logger.error("Failed to review file. path={}, err={}", file.path, e.toString(), e);
                 // 发送文件审查错误事件
@@ -296,10 +333,6 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
             }
         }
 
-        // 整合所有文件的review结果
-        int overallScore = validScoreCount > 0 ? totalScore / validScoreCount : 0;
-        String combinedSummary = summaries.isEmpty() ? "No summary available." : String.join("\n\n", summaries);
-
         // 将 JsonNode 列表转换为 Map 列表
         List<Map<String, Object>> commentsList = new ArrayList<>();
         for (JsonNode comment : allComments) {
@@ -308,22 +341,34 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
             commentsList.add(commentMap);
         }
 
-        // 构建最终的整合结果
+        // 构建最终的整合结果，包含PR摘要
         Map<String, Object> mergedReview = new HashMap<>();
-        mergedReview.put("overall_score", overallScore);
-        mergedReview.put("summary", combinedSummary);
-        mergedReview.put("general_review", "This review was generated by reviewing each file separately and merging the results.");
         mergedReview.put("comments", commentsList);
+
+        // 如果PR摘要存在，将其添加到结果中
+        if (prSummaryJson != null) {
+            JsonNode prSummary = prSummaryJson.get("pr_summary");
+            if (prSummary != null) {
+                // 更新review_summary中的total_comments
+                JsonNode reviewSummary = prSummary.get("review_summary");
+                if (reviewSummary != null) {
+                    Map<String, Object> reviewSummaryMap = mapper.convertValue(reviewSummary, new TypeReference<Map<String, Object>>() {
+                    });
+                    reviewSummaryMap.put("total_comments", allComments.size());
+                    Map<String, Object> prSummaryMap = mapper.convertValue(prSummary, new TypeReference<Map<String, Object>>() {
+                    });
+                    prSummaryMap.put("review_summary", reviewSummaryMap);
+                    mergedReview.put("pr_summary", prSummaryMap);
+                } else {
+                    mergedReview.put("pr_summary", mapper.convertValue(prSummary, new TypeReference<Map<String, Object>>() {
+                    }));
+                }
+            }
+        }
 
         // Send final review results
         String summaryHeader = "\n---\n\n## 🎉 Review Complete\n\n";
         emitter.send(SseEmitter.event().name("review_summary").data(buildEmitterPayload(summaryHeader)));
-
-        String scoreMsg = "### 🎯 Overall Score\n\n" + getScoreEmoji(overallScore) + " **" + overallScore + "/100**\n\n";
-        emitter.send(SseEmitter.event().name("review_summary").data(buildEmitterPayload(scoreMsg)));
-
-        String summaryMsg = "### 📝 Review Summary\n\n" + combinedSummary + "\n\n";
-        emitter.send(SseEmitter.event().name("review_summary").data(buildEmitterPayload(summaryMsg)));
 
         if (!commentsList.isEmpty()) {
             String commentsHeader = "### 💬 Detailed Comments (" + commentsList.size() + " items)\n\n";
@@ -338,8 +383,8 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
             }
         }
 
-        logger.info("Completed per-file streaming review. totalFiles={}, overallScore={}, totalComments={}", files.size(), overallScore, allComments.size());
-        String completeMsg = "\n---\n\n✅ **Review Complete** | Files: " + files.size() + " | Score: " + overallScore + " | Comments: " + allComments.size() + "\n\n";
+        logger.info("Completed per-file streaming review. totalFiles={}, totalComments={}", files.size(), allComments.size());
+        String completeMsg = "\n---\n\n✅ **Review Complete** | Files: " + files.size() + " | Comments: " + allComments.size() + "\n\n";
         emitter.send(SseEmitter.event().name("review_complete").data(buildEmitterPayload(completeMsg)));
 
         // 将整合后的review结果序列化为JSON字符串并返回
@@ -389,6 +434,55 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
             logger.warn("Failed to parse PR number: {}", raw);
             return null;
         }
+    }
+
+    /**
+     * 生成PR整体摘要
+     *
+     * @param diffCode       代码差异
+     * @param ragContext     RAG上下文
+     * @param maxPromptChars 最大prompt字符数限制
+     * @return PR摘要的JSON字符串
+     * @throws Exception 如果生成失败
+     */
+    private String generatePrSummary(String diffCode, String ragContext, int maxPromptChars) throws Exception {
+        ObjectMapper mapper = new ObjectMapper();
+
+        // 将所有文件转换为JSON
+        List<VCSUtils.FileChanges> allFilesList;
+        try {
+            allFilesList = VCSUtils.parseUnifiedDiff(diffCode);
+        } catch (Exception e) {
+            logger.warn("Failed to parse unified diff for summary; fallback to empty list. err={}", e.toString());
+            allFilesList = new ArrayList<>();
+        }
+
+        String structuredJson = mapper.writeValueAsString(allFilesList);
+
+        String basePrompt = ReviewPrompts.PR_SUMMARY_PROMPT;
+        // 将占位符替换为结构化 JSON 和 RAG context
+        String mergedPrompt = basePrompt.replace("<Git diff>", structuredJson).replace("<RAG context>", ragContext != null && !ragContext.isEmpty() ? ragContext : "No additional context available.");
+
+        if (mergedPrompt.length() > maxPromptChars) {
+            logger.warn("Prompt too large for PR summary. promptSize={}, maxSize={}", mergedPrompt.length(), maxPromptChars);
+        }
+
+        logger.debug("Request for PR summary");
+
+        // Build messages for ChatClient
+        List<org.springframework.ai.chat.messages.Message> messages = new ArrayList<>();
+        messages.add(new UserMessage(mergedPrompt));
+
+        // Create prompt with model options
+        Prompt prompt = new Prompt(messages, OpenAiChatOptions.builder().model(this.model != null ? this.model : ModelEnum.GPT_4O.getCode()).build());
+
+        // Call ChatClient (non-streaming for summary)
+        org.springframework.ai.chat.model.ChatResponse response = chatClient.prompt(prompt).call().chatResponse();
+        String content = response.getResult().getOutput().getText();
+
+        logger.debug("PR summary response. contentSize={}", content != null ? content.length() : 0);
+
+        return content;
     }
 
     /**
@@ -447,9 +541,6 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
     @SuppressWarnings("unused")
     private Map<String, Object> createEmptyReview() {
         Map<String, Object> review = new HashMap<>();
-        review.put("overall_score", 0);
-        review.put("summary", "No changes found in diff.");
-        review.put("general_review", "");
         review.put("comments", new ArrayList<>());
         return review;
     }
@@ -480,15 +571,20 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
             String cleaned = ReviewJsonUtils.extractJsonPayload(recommend);
             root = mapper.readTree(cleaned);
         }
-        Integer overallScore = ReviewJsonUtils.safeInt(root, "overall_score");
-        String summary = ReviewJsonUtils.safeText(root, "summary");
-        String general = ReviewJsonUtils.safeText(root, "general_review");
+        // Build top-level comment from PR summary if available
         StringBuilder topBuilder = new StringBuilder();
-        if (overallScore != null) {
-            topBuilder.append("### 😀 Overall Score\n").append("⭐️ ").append(overallScore).append("/100").append("\n\n");
+        JsonNode prSummary = root.get("pr_summary");
+        if (prSummary != null) {
+            String title = ReviewJsonUtils.safeText(prSummary, "title");
+            String description = ReviewJsonUtils.safeText(prSummary, "description");
+            if (title != null && !title.isEmpty()) {
+                topBuilder.append("### ").append(title).append("\n\n");
+            }
+            if (description != null && !description.isEmpty()) {
+                topBuilder.append(description).append("\n\n");
+            }
         }
-        topBuilder.append(ReviewCommentUtils.buildTopLevelComment(summary, general));
-        String combinedTop = topBuilder.toString();
+        String combinedTop = topBuilder.length() > 0 ? topBuilder.toString() : "AI Code Review completed.";
         postCommentToGithubPr(combinedTop);
 
         // Inline comments
@@ -684,14 +780,6 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
         logger.info("PR review created successfully. code={}", code);
     }
 
-    private String getScoreEmoji(int score) {
-        if (score >= 90) return "🌟";
-        if (score >= 80) return "🚀";
-        if (score >= 70) return "👍";
-        if (score >= 60) return "👌";
-        return "⚠️";
-    }
-
     private String getSeverityEmoji(String severity) {
         if (severity == null) return "🔎";
         String lower = severity.toLowerCase();
@@ -752,18 +840,22 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
 
             StringBuilder contentBuilder = new StringBuilder();
             if (reviewNode != null) {
-                Integer score = ReviewJsonUtils.safeInt(reviewNode, "overall_score");
-                String summary = ReviewJsonUtils.safeText(reviewNode, "summary");
-                String general = ReviewJsonUtils.safeText(reviewNode, "general_review");
-
-                if (score != null) {
-                    contentBuilder.append("### Overall Score: ").append(score).append("/100\n\n");
+                // 从PR摘要中获取信息
+                JsonNode prSummary = reviewNode.get("pr_summary");
+                if (prSummary != null) {
+                    String title = ReviewJsonUtils.safeText(prSummary, "title");
+                    String description = ReviewJsonUtils.safeText(prSummary, "description");
+                    if (title != null && !title.isEmpty()) {
+                        contentBuilder.append("### PR Title: ").append(title).append("\n\n");
+                    }
+                    if (description != null && !description.isEmpty()) {
+                        contentBuilder.append("### PR Description\n\n").append(description).append("\n\n");
+                    }
                 }
-                if (summary != null && !summary.isEmpty()) {
-                    contentBuilder.append("### Summary\n\n").append(summary).append("\n\n");
-                }
-                if (general != null && !general.isEmpty()) {
-                    contentBuilder.append("### General Review\n\n").append(general).append("\n\n");
+                // 添加评论数量信息
+                JsonNode comments = reviewNode.get("comments");
+                if (comments != null && comments.isArray()) {
+                    contentBuilder.append("### Comments: ").append(comments.size()).append(" items\n\n");
                 }
             } else {
                 // 如果无法解析 JSON，使用原始内容

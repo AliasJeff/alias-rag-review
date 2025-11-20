@@ -616,24 +616,43 @@ public class RAGServiceImpl implements IRAGService {
 
     List<String> results = new ArrayList<>();
 
-    for (Document chunk : chunks) {
+    for (int i = 0; i < chunks.size(); i++) {
+      Document chunk = chunks.get(i);
+      String chunkText = Objects.requireNonNull(chunk.getText());
+      int queryTokens = countTokens(chunkText);
+      int queryChars = chunkText.length();
+
       // 2. 构建过滤条件：knowledge == repoName
       FilterExpressionBuilder builder = new FilterExpressionBuilder();
       Filter.Expression filter = builder.eq("repo", repoName).build();
 
       // 3. 构建搜索请求
       SearchRequest request =
-          SearchRequest.builder()
-              .query(Objects.requireNonNull(chunk.getText()))
-              .topK(5)
-              .filterExpression(filter)
-              .build();
+          SearchRequest.builder().query(chunkText).topK(5).filterExpression(filter).build();
 
       // 4. 执行相似度搜索
       List<Document> matched = pgVectorStore.similaritySearch(request);
+      int resultTokens = 0;
+      int resultChars = 0;
       for (Document m : matched) {
-        results.add(m.getFormattedContent());
+        String formatted = m.getFormattedContent();
+        if (formatted == null) {
+          continue;
+        }
+        resultTokens += countTokens(formatted);
+        resultChars += formatted.length();
+        results.add(formatted);
       }
+
+      log.info(
+          "[reviewCodeContext] repo={} chunk={} queryTokens={} queryChars={} resultTokens={} resultChars={} matches={}",
+          repoName,
+          i,
+          queryTokens,
+          queryChars,
+          resultTokens,
+          resultChars,
+          matched.size());
     }
 
     // 5. 拼接返回上下文
@@ -643,5 +662,12 @@ public class RAGServiceImpl implements IRAGService {
   @Override
   public List<String> getRepositoryTags(String repoName) throws IOException {
     return new ArrayList<>();
+  }
+
+  private int countTokens(String text) {
+    if (text == null || text.isBlank()) {
+      return 0;
+    }
+    return text.trim().split("\\s+").length;
   }
 }

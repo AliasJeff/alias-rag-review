@@ -944,10 +944,35 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
                         contentBuilder.append("### PR Description\n\n").append(description).append("\n\n");
                     }
                 }
-                // 添加评论数量信息
+                // 添加评论数量及详细信息
                 JsonNode comments = reviewNode.get("comments");
                 if (comments != null && comments.isArray()) {
                     contentBuilder.append("### Comments: ").append(comments.size()).append(" items\n\n");
+                    for (int idx = 0; idx < comments.size(); idx++) {
+                        JsonNode comment = comments.get(idx);
+                        String severity = ReviewJsonUtils.safeText(comment, "severity");
+                        String severityEmoji = getSeverityEmoji(severity);
+                        String path = ReviewJsonUtils.safeText(comment, "path");
+                        Integer line = ReviewJsonUtils.safeInt(comment, "line");
+                        String body = ReviewJsonUtils.safeText(comment, "body");
+
+                        contentBuilder.append("#### ").append(severityEmoji).append(" Comment ").append(idx + 1).append("\n\n");
+
+                        if (path != null && !path.isEmpty()) {
+                            contentBuilder.append("**File:** `").append(path).append("`\n");
+                        }
+                        if (line != null && line > 0) {
+                            contentBuilder.append("**Line:** ").append(line).append("\n");
+                        }
+                        if (severity != null && !severity.isEmpty()) {
+                            contentBuilder.append("**Severity:** ").append(severity).append("\n\n");
+                        } else {
+                            contentBuilder.append("\n");
+                        }
+                        if (body != null && !body.isEmpty()) {
+                            contentBuilder.append(body).append("\n\n");
+                        }
+                    }
                 }
             } else {
                 // 如果无法解析 JSON，使用原始内容

@@ -8,16 +8,16 @@ import com.alias.domain.service.AbstractOpenAiCodeReviewService;
 import com.alias.domain.service.IPrSnapshotService;
 import com.alias.domain.utils.ChatUtils;
 import com.alias.infrastructure.git.GitCommand;
-import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.messages.UserMessage;
-import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.ai.openai.OpenAiChatOptions;
 import com.alias.utils.*;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.openai.OpenAiChatOptions;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -290,7 +290,7 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
 
         if (mergedPrompt.length() > maxPromptChars) {
             logger.warn("Prompt too large for single file. file={}, promptSize={}, maxSize={}", file.path, mergedPrompt.length(), maxPromptChars);
-            throw new RuntimeException("Prompt too large for file: " + file.path);
+//            throw new RuntimeException("Prompt too large for file: " + file.path);
         }
 
         logger.debug("Request for file: {}", file.path);

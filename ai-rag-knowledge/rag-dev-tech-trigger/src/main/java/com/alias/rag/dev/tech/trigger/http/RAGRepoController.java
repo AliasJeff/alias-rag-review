@@ -152,14 +152,17 @@ public class RAGRepoController implements IRAGRepoService {
 
   @RequestMapping(value = "delete-repo", method = RequestMethod.POST)
   @Override
-  public Response<String> deleteRepo(@RequestBody RagRepoDTO ragRepoDTO) {
+  public Response<String> deleteRepo(@RequestBody RagRepoDTO ragRepoDTO) throws IOException {
     String repoName = ragRepoDTO.getRepoName();
     if (repoName == null || repoName.isEmpty()) {
       return Response.<String>builder().code("4000").info("Repository name is required").build();
     }
 
-    String localPath = Paths.get(repoBasePath, repoName).toString();
-    File dir = new File(localPath);
+    // 2. 确定仓库长期保存路径
+    Path baseDir = Paths.get(System.getProperty("user.home"), "ai-rag-repos");
+    Files.createDirectories(baseDir);
+    Path repoPath = baseDir.resolve(repoName);
+    File dir = repoPath.toFile();
 
     if (!dir.exists()) {
       return Response.<String>builder()

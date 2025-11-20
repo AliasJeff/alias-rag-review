@@ -197,7 +197,8 @@ public class AiConversationService implements IAiConversationService {
             }
 
             // Send completion event
-            emitter.send(SseEmitter.event().id(context.getConversationId()).name("complete").data("Streaming completed"));
+            String completeMsg = "✅ **Conversation Complete**\n\n";
+            emitter.send(SseEmitter.event().id(context.getConversationId()).name("complete").data(completeMsg));
 
             emitter.complete();
 

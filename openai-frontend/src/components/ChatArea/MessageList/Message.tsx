@@ -21,13 +21,15 @@ const getMarkdownComponents = (): Record<string, any> => ({
   p: ({ children }: any) => <p className={styles.paragraph}>{children}</p>,
   code: (props: any) => {
     const { inline, children, className } = props;
-    return inline ? (
-      <code className={styles.inlineCode}>{children}</code>
-    ) : (
-      <CodeBlock className={className}>{children}</CodeBlock>
-    );
+    if (!className) {
+      return <code className={styles.inlineCode}>{children}</code>;
+    } else {
+      return <CodeBlock className={className}>{children}</CodeBlock>;
+    }
   },
-  pre: ({ children }: any) => <>{children}</>,
+  pre: ({ children }: any) => {
+    return <>{children}</>;
+  },
   ul: ({ children }: any) => <ul className={styles.list}>{children}</ul>,
   ol: ({ children }: any) => <ol className={styles.orderedList}>{children}</ol>,
   li: ({ children }: any) => <li className={styles.listItem}>{children}</li>,

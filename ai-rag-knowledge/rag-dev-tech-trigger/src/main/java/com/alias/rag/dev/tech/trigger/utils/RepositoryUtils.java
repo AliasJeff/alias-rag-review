@@ -212,17 +212,124 @@ public class RepositoryUtils {
 
     Set<String> ALLOWED =
         Set.of(
-            ".md", ".txt", ".java", ".js", ".ts", ".go", ".py", ".kt", ".xml", ".yaml", ".yml",
-            ".json");
+            ".md",
+            ".txt",
+            ".java",
+            ".js",
+            ".ts",
+            ".go",
+            ".py",
+            ".kt",
+            ".xml",
+            ".yaml",
+            ".yml",
+            ".json",
+            ".properties",
+            ".gradle",
+            ".sql");
+
+    // 需要忽略的目录
+    Set<String> IGNORE_DIRS =
+        Set.of(
+            ".git",
+            ".idea",
+            ".vscode",
+            "node_modules",
+            "dist",
+            "build",
+            "out",
+            "target",
+            ".gradle",
+            ".mvn",
+            "__pycache__",
+            "venv",
+            ".venv",
+            "env",
+            ".mypy_cache",
+            "pytest_cache",
+            "staticfiles",
+            "media",
+            "bin",
+            "obj",
+            "coverage",
+            ".cache",
+            ".eslintcache",
+            ".next",
+            ".nuxt",
+            ".svelte-kit",
+            "parcel-cache",
+            ".storybook",
+            ".cypress",
+            "playwright-report",
+            ".vitepress",
+            ".vuepress");
+
+    // 需要忽略的文件（完全匹配）
+    Set<String> IGNORE_FILES =
+        Set.of(
+            "package-lock.json",
+            "yarn.lock",
+            "pnpm-lock.yaml",
+            "gradle.lockfile",
+            "pom.xml.versionsBackup",
+            "Pipfile.lock",
+            "poetry.lock",
+            "requirements.txt.lock",
+            ".DS_Store",
+            "Thumbs.db",
+            "env.json",
+            "local.settings.json",
+            "application-local.yml",
+            "application-local.properties",
+            "webpack-stats.json",
+            "tsconfig.tsbuildinfo",
+            "npm-debug.log",
+            "yarn-error.log",
+            "pnpm-debug.log");
+
+    long MAX_FILE_SIZE = 5L * 1024 * 1024; // 5MB，可改
 
     Files.walkFileTree(
         repoPath,
         new SimpleFileVisitor<>() {
+
+          @Override
+          public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
+            String name = dir.getFileName().toString();
+            if (IGNORE_DIRS.contains(name)) {
+              return FileVisitResult.SKIP_SUBTREE;
+            }
+            return FileVisitResult.CONTINUE;
+          }
+
           @Override
           public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
 
-            String filename = file.getFileName().toString().toLowerCase();
-            if (ALLOWED.stream().noneMatch(filename::endsWith)) return FileVisitResult.CONTINUE;
+            String filename = file.getFileName().toString();
+
+            // 忽略指定文件
+            if (IGNORE_FILES.contains(filename)) {
+              return FileVisitResult.CONTINUE;
+            }
+
+            // 忽略文件大小过大的（防止 OOM）
+            try {
+              if (Files.size(file) > MAX_FILE_SIZE) {
+                log.warn(
+                    "[{}] Skip large file {} (size={}MB)",
+                    repoName,
+                    filename,
+                    Files.size(file) / 1024 / 1024);
+                return FileVisitResult.CONTINUE;
+              }
+            } catch (IOException ignore) {
+            }
+
+            // 只接受白名单后缀
+            String lower = filename.toLowerCase();
+            if (ALLOWED.stream().noneMatch(lower::endsWith)) {
+              return FileVisitResult.CONTINUE;
+            }
 
             Path relativePath = repoPath.relativize(file);
             String filePath = relativePath.toString().replace("\\", "/");
@@ -230,6 +337,8 @@ public class RepositoryUtils {
             try {
               TikaDocumentReader reader = new TikaDocumentReader(new PathResource(file));
               List<Document> docs = reader.get();
+
+              // 全量 chunk，确保不会丢
               List<Document> chunks = tokenTextSplitter.apply(docs);
 
               chunks.forEach(
@@ -392,7 +501,7 @@ public class RepositoryUtils {
       SearchRequest request =
           SearchRequest.builder()
               .query(Objects.requireNonNull(chunk.getText()))
-              .topK(5)
+              .topK(2)
               .filterExpression(filter)
               .build();
 

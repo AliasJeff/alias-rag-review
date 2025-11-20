@@ -610,53 +610,155 @@ public class RAGServiceImpl implements IRAGService {
 
   @Override
   public String reviewCodeContext(String repoName, String code) {
-    // 1. 将代码分块
     Document doc = new Document(code);
     List<Document> chunks = tokenTextSplitter.apply(List.of(doc));
+    if (chunks.isEmpty()) {
+      log.warn("[reviewCodeContext] repo={} received empty chunks, return empty context", repoName);
+      return "";
+    }
 
-    List<String> results = new ArrayList<>();
+    log.info(
+        "[reviewCodeContext] repo={} totalChunks={} requestLength={}",
+        repoName,
+        chunks.size(),
+        code.length());
 
+    // 阶段 1：常规相似度搜索
+    Filter.Expression stageOneFilter = new FilterExpressionBuilder().eq("repo", repoName).build();
+    List<Document> stageOneMatches = new ArrayList<>();
     for (int i = 0; i < chunks.size(); i++) {
       Document chunk = chunks.get(i);
       String chunkText = Objects.requireNonNull(chunk.getText());
       int queryTokens = countTokens(chunkText);
       int queryChars = chunkText.length();
 
-      // 2. 构建过滤条件：knowledge == repoName
-      FilterExpressionBuilder builder = new FilterExpressionBuilder();
-      Filter.Expression filter = builder.eq("repo", repoName).build();
-
-      // 3. 构建搜索请求
       SearchRequest request =
-          SearchRequest.builder().query(chunkText).topK(5).filterExpression(filter).build();
-
-      // 4. 执行相似度搜索
+          SearchRequest.builder()
+              .query(chunkText)
+              .topK(12)
+              .filterExpression(stageOneFilter)
+              .build();
       List<Document> matched = pgVectorStore.similaritySearch(request);
-      int resultTokens = 0;
-      int resultChars = 0;
-      for (Document m : matched) {
-        String formatted = m.getFormattedContent();
-        if (formatted == null) {
-          continue;
-        }
-        resultTokens += countTokens(formatted);
-        resultChars += formatted.length();
-        results.add(formatted);
-      }
+      stageOneMatches.addAll(matched);
 
       log.info(
-          "[reviewCodeContext] repo={} chunk={} queryTokens={} queryChars={} resultTokens={} resultChars={} matches={}",
+          "[reviewCodeContext][phase-1] repo={} chunk={} queryTokens={} queryChars={} matches={}",
           repoName,
           i,
           queryTokens,
           queryChars,
-          resultTokens,
-          resultChars,
           matched.size());
     }
 
-    // 5. 拼接返回上下文
-    return String.join("\n---\n", results);
+    if (stageOneMatches.isEmpty()) {
+      log.info("[reviewCodeContext][phase-1] repo={} no matches, return empty", repoName);
+      return "";
+    }
+
+    log.info(
+        "[reviewCodeContext][phase-1] repo={} aggregatedMatches={}",
+        repoName,
+        stageOneMatches.size());
+
+    Set<String> candidateIds =
+        stageOneMatches.stream()
+            .map(m -> Objects.toString(m.getMetadata().get("id"), null))
+            .filter(Objects::nonNull)
+            .collect(Collectors.toCollection(LinkedHashSet::new));
+
+    if (candidateIds.isEmpty()) {
+      log.info("[reviewCodeContext][phase-2] repo={} no candidate ids, fallback phase-1", repoName);
+      return joinDocuments(stageOneMatches);
+    }
+
+    // 阶段 2：候选集合内部再检索
+    Object[] idArray = candidateIds.toArray();
+    FilterExpressionBuilder stageTwoBuilder = new FilterExpressionBuilder();
+    Filter.Expression limitedFilter =
+        stageTwoBuilder
+            .and(stageTwoBuilder.eq("repo", repoName), stageTwoBuilder.in("id", idArray))
+            .build();
+
+    String aggregatedQuery =
+        chunks.stream()
+            .map(Document::getText)
+            .filter(Objects::nonNull)
+            .collect(Collectors.joining("\n"))
+            .trim();
+    if (aggregatedQuery.isBlank()) {
+      aggregatedQuery = code;
+    }
+    int aggregatedTokens = countTokens(aggregatedQuery);
+
+    log.info(
+        "[reviewCodeContext][phase-2] repo={} candidateIds={} aggregatedQueryChars={} aggregatedQueryTokens={}",
+        repoName,
+        candidateIds.size(),
+        aggregatedQuery.length(),
+        aggregatedTokens);
+
+    int stageTwoTopK =
+        candidateIds.size() < 5 ? candidateIds.size() : Math.min(10, candidateIds.size());
+    int effectiveTopK = stageTwoTopK == 0 ? candidateIds.size() : stageTwoTopK;
+    List<Document> stageTwoMatches =
+        pgVectorStore.similaritySearch(
+            SearchRequest.builder()
+                .query(aggregatedQuery)
+                .topK(effectiveTopK)
+                .filterExpression(limitedFilter)
+                .build());
+
+    log.info(
+        "[reviewCodeContext][phase-2] repo={} candidateIds={} requestTopK={} matches={}",
+        repoName,
+        candidateIds.size(),
+        effectiveTopK,
+        stageTwoMatches.size());
+
+    if (stageTwoMatches.isEmpty()) {
+      return joinDocuments(stageOneMatches);
+    }
+
+    // 阶段 3：rerank + 过滤低相关
+    final double scoreThreshold = 0.45d;
+    log.info(
+        "[reviewCodeContext][phase-3] repo={} threshold={} beforeRerank={}",
+        repoName,
+        scoreThreshold,
+        stageTwoMatches.size());
+    List<Document> reranked =
+        stageTwoMatches.stream()
+            .sorted(
+                Comparator.comparing(
+                        (Document m) ->
+                            Optional.ofNullable(m.getScore()).orElse(Double.NEGATIVE_INFINITY))
+                    .reversed())
+            .filter(
+                m -> {
+                  Double score = m.getScore();
+                  return score == null || score >= scoreThreshold;
+                })
+            .collect(Collectors.toList());
+    if (reranked.isEmpty()) {
+      reranked = stageTwoMatches;
+    }
+
+    String response = joinDocuments(reranked);
+    int responseTokens = countTokens(response);
+    log.info(
+        "[reviewCodeContext][phase-3] repo={} threshold={} finalChunks={} finalTokens={} finalChars={}",
+        repoName,
+        scoreThreshold,
+        reranked.size(),
+        responseTokens,
+        response.length());
+    log.info(
+        "[reviewCodeContext] repo={} finalResponseChunks={} finalResponseTokens={} finalResponseChars={}",
+        repoName,
+        reranked.size(),
+        responseTokens,
+        response.length());
+    return response;
   }
 
   @Override
@@ -669,5 +771,15 @@ public class RAGServiceImpl implements IRAGService {
       return 0;
     }
     return text.trim().split("\\s+").length;
+  }
+
+  private String joinDocuments(List<Document> docs) {
+    List<String> formatted =
+        docs.stream()
+            .map(Document::getFormattedContent)
+            .filter(Objects::nonNull)
+            .filter(s -> !s.isBlank())
+            .collect(Collectors.toList());
+    return String.join("\n---\n", formatted);
   }
 }

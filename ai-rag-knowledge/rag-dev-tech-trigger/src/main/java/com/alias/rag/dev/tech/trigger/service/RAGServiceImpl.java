@@ -10,6 +10,8 @@ import java.io.IOException;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
 import org.eclipse.jgit.api.Git;
@@ -35,9 +37,6 @@ import org.springframework.stereotype.Service;
 @Slf4j
 @Service
 public class RAGServiceImpl implements IRAGService {
-
-  @Value("${repo.base-path}")
-  private String repoBasePath;
 
   @Value("${github.token}")
   private String githubToken;
@@ -205,13 +204,54 @@ public class RAGServiceImpl implements IRAGService {
     }
   }
 
+  private static final Set<String> CODE_EXTENSIONS =
+      Set.of(".java", ".kt", ".js", ".ts", ".py", ".go");
+
+  private static final List<CodePattern> JAVA_KOTLIN_PATTERNS =
+      List.of(
+          new CodePattern(
+              Pattern.compile(
+                  "(?m)^\\s*(?:public|protected|private|abstract|final|static|sealed|non-sealed|data|record)?\\s*(?:class|interface|enum|record)\\s+([A-Za-z0-9_]+)"),
+              "class ",
+              1),
+          new CodePattern(
+              Pattern.compile(
+                  "(?m)^\\s*(?:public|protected|private)?\\s*(?:static\\s+)?[\\w<>\\[\\]]+\\s+([A-Za-z0-9_]+)\\s*\\([^)]*\\)\\s*(?:throws [^{]+)?\\s*\\{"),
+              "method ",
+              1));
+
+  private static final List<CodePattern> JS_TS_PATTERNS =
+      List.of(
+          new CodePattern(Pattern.compile("(?m)^\\s*class\\s+([A-Za-z0-9_]+)"), "class ", 1),
+          new CodePattern(
+              Pattern.compile("(?m)^\\s*function\\s+([A-Za-z0-9_]+)\\s*\\("), "function ", 1),
+          new CodePattern(
+              Pattern.compile(
+                  "(?m)^\\s*(?:const|let|var)\\s+([A-Za-z0-9_]+)\\s*=\\s*\\([^)]*\\)\\s*=>"),
+              "function ",
+              1),
+          new CodePattern(
+              Pattern.compile("(?m)^\\s*([A-Za-z0-9_]+)\\s*\\([^)]*\\)\\s*\\{"), "method ", 1));
+
+  private static final List<CodePattern> PYTHON_PATTERNS =
+      List.of(
+          new CodePattern(
+              Pattern.compile("(?m)^\\s*class\\s+([A-Za-z0-9_]+)\\s*\\(?.*:"), "class ", 1),
+          new CodePattern(Pattern.compile("(?m)^\\s*def\\s+([A-Za-z0-9_]+)\\s*\\("), "def ", 1));
+
+  private static final List<CodePattern> GO_PATTERNS =
+      List.of(
+          new CodePattern(
+              Pattern.compile("(?m)^\\s*type\\s+([A-Za-z0-9_]+)\\s+struct"), "type ", 1),
+          new CodePattern(
+              Pattern.compile("(?m)^\\s*func\\s+\\(?([A-Za-z0-9_]+)\\)?\\s*\\("), "func ", 1));
+
   @Override
   public void indexRepositoryFiles(Path repoPath, String repoName) throws IOException {
 
     Set<String> ALLOWED =
         Set.of(
             ".md",
-            ".txt",
             ".java",
             ".js",
             ".ts",
@@ -230,6 +270,8 @@ public class RAGServiceImpl implements IRAGService {
     Set<String> IGNORE_DIRS =
         Set.of(
             ".git",
+            ".text",
+            ".txt",
             ".idea",
             ".vscode",
             "node_modules",
@@ -250,6 +292,7 @@ public class RAGServiceImpl implements IRAGService {
             "bin",
             "obj",
             "coverage",
+            ".log",
             ".cache",
             ".eslintcache",
             ".next",
@@ -331,25 +374,7 @@ public class RAGServiceImpl implements IRAGService {
 
             Path relativePath = repoPath.relativize(file);
             String filePath = relativePath.toString().replace("\\", "/");
-
-            try {
-              TikaDocumentReader reader = new TikaDocumentReader(new PathResource(file));
-              List<Document> docs = reader.get();
-
-              // 全量 chunk，确保不会丢
-              List<Document> chunks = tokenTextSplitter.apply(docs);
-
-              chunks.forEach(
-                  d -> {
-                    d.getMetadata().put("repo", repoName);
-                    d.getMetadata().put("id", filePath);
-                  });
-
-              pgVectorStore.accept(chunks);
-
-            } catch (Exception e) {
-              log.error("[{}] Failed to index file {}: {}", repoName, filePath, e.getMessage());
-            }
+            indexSingleFile(repoPath, repoName, filePath);
 
             return FileVisitResult.CONTINUE;
           }
@@ -404,7 +429,7 @@ public class RAGServiceImpl implements IRAGService {
             case ADD:
               path = diff.getNewPath();
               if (ALLOWED.stream().noneMatch(path.toLowerCase()::endsWith)) continue;
-              indexFile(repoPath, repoName, path);
+              indexSingleFile(repoPath, repoName, path);
               break;
 
             case MODIFY:
@@ -416,7 +441,7 @@ public class RAGServiceImpl implements IRAGService {
               deleteDocumentById(docId);
 
               // 再插入新向量
-              indexFile(repoPath, repoName, path);
+              indexSingleFile(repoPath, repoName, path);
               break;
 
             case DELETE:
@@ -456,16 +481,16 @@ public class RAGServiceImpl implements IRAGService {
   }
 
   /** 索引单个文件 */
-  private void indexFile(Path repoPath, String repoName, String path) {
+  private void indexSingleFile(Path repoPath, String repoName, String path) {
     Path filePath = repoPath.resolve(path);
     log.info("[{}] Indexing file: {}", repoName, path);
     try {
-      TikaDocumentReader reader = new TikaDocumentReader(new PathResource(filePath));
-      List<Document> docs = reader.get();
-      List<Document> chunks = tokenTextSplitter.apply(docs);
+      String normalizedPath = path.replace("\\", "/");
+      List<Document> docs = buildDocumentsForFile(filePath, normalizedPath.toLowerCase());
+      List<Document> chunks = chunkDocuments(docs);
 
       for (Document d : chunks) {
-        String docId = repoName + ":" + path.replace("\\", "/");
+        String docId = repoName + ":" + normalizedPath;
         d.getMetadata().put("id", docId);
         d.getMetadata().put("repo", repoName);
       }
@@ -475,6 +500,105 @@ public class RAGServiceImpl implements IRAGService {
       log.error("Failed to index file {}: {}", path, e.getMessage());
     }
   }
+
+  private List<Document> buildDocumentsForFile(Path filePath, String lowerPath) throws IOException {
+    if (!isCodeFile(lowerPath)) {
+      TikaDocumentReader reader = new TikaDocumentReader(new PathResource(filePath));
+      return reader.get();
+    }
+    String content = Files.readString(filePath);
+    return splitCodeBlocks(content, lowerPath);
+  }
+
+  private List<Document> chunkDocuments(List<Document> docs) {
+    List<Document> chunks = new ArrayList<>();
+    for (Document doc : docs) {
+      List<Document> chunked = tokenTextSplitter.apply(List.of(doc));
+      Object segment = doc.getMetadata().get("segment");
+      if (segment != null) {
+        chunked.forEach(c -> c.getMetadata().put("segment", segment));
+      }
+      chunks.addAll(chunked);
+    }
+    return chunks;
+  }
+
+  private boolean isCodeFile(String lowerPath) {
+    return CODE_EXTENSIONS.stream().anyMatch(lowerPath::endsWith);
+  }
+
+  private List<Document> splitCodeBlocks(String content, String lowerPath) {
+    List<CodePattern> patterns = patternsForExtension(lowerPath);
+    if (patterns.isEmpty()) {
+      return List.of(new Document(content));
+    }
+
+    Map<Integer, CodeBlockMarker> markers = new HashMap<>();
+    for (CodePattern codePattern : patterns) {
+      Matcher matcher = codePattern.pattern().matcher(content);
+      while (matcher.find()) {
+        int start = matcher.start();
+        markers.putIfAbsent(
+            start,
+            new CodeBlockMarker(
+                start,
+                codePattern.labelPrefix()
+                    + Optional.ofNullable(matcher.group(codePattern.nameGroup())).orElse("")));
+      }
+    }
+
+    if (markers.isEmpty()) {
+      Document fallback = new Document(content);
+      fallback.getMetadata().put("segment", "file");
+      return List.of(fallback);
+    }
+
+    List<CodeBlockMarker> sortedMarkers =
+        markers.values().stream()
+            .sorted(Comparator.comparingInt(CodeBlockMarker::start))
+            .collect(Collectors.toList());
+
+    List<Document> documents = new ArrayList<>();
+    for (int i = 0; i < sortedMarkers.size(); i++) {
+      int start = sortedMarkers.get(i).start();
+      int end =
+          (i + 1 < sortedMarkers.size()) ? sortedMarkers.get(i + 1).start() : content.length();
+      if (end <= start) continue;
+      String block = content.substring(start, end).trim();
+      if (block.isEmpty()) continue;
+      Document document = new Document(block);
+      document.getMetadata().put("segment", sortedMarkers.get(i).label());
+      documents.add(document);
+    }
+
+    if (documents.isEmpty()) {
+      Document fallback = new Document(content);
+      fallback.getMetadata().put("segment", "file");
+      documents.add(fallback);
+    }
+
+    return documents;
+  }
+
+  private List<CodePattern> patternsForExtension(String lowerPath) {
+    if (lowerPath.endsWith(".java") || lowerPath.endsWith(".kt")) {
+      return JAVA_KOTLIN_PATTERNS;
+    }
+    if (lowerPath.endsWith(".js") || lowerPath.endsWith(".ts")) {
+      return JS_TS_PATTERNS;
+    }
+    if (lowerPath.endsWith(".py")) {
+      return PYTHON_PATTERNS;
+    }
+    if (lowerPath.endsWith(".go")) {
+      return GO_PATTERNS;
+    }
+    return List.of();
+  }
+
+  private record CodePattern(Pattern pattern, String labelPrefix, int nameGroup) {}
+
+  private record CodeBlockMarker(int start, String label) {}
 
   @Override
   public void deleteIndexedCommit(String repoName) throws IOException {
@@ -501,7 +625,7 @@ public class RAGServiceImpl implements IRAGService {
       SearchRequest request =
           SearchRequest.builder()
               .query(Objects.requireNonNull(chunk.getText()))
-              .topK(2)
+              .topK(5)
               .filterExpression(filter)
               .build();
 

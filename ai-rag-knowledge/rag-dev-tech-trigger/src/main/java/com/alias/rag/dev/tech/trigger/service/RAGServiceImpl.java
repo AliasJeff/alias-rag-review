@@ -1,5 +1,6 @@
-package com.alias.rag.dev.tech.trigger.utils;
+package com.alias.rag.dev.tech.trigger.service;
 
+import com.alias.rag.dev.tech.api.IRAGService;
 import com.alias.rag.dev.tech.api.dto.RagRepoDTO;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -29,11 +30,11 @@ import org.springframework.ai.vectorstore.filter.FilterExpressionBuilder;
 import org.springframework.ai.vectorstore.pgvector.PgVectorStore;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.PathResource;
-import org.springframework.stereotype.Component;
+import org.springframework.stereotype.Service;
 
 @Slf4j
-@Component
-public class RepositoryUtils {
+@Service
+public class RAGServiceImpl implements IRAGService {
 
   @Value("${repo.base-path}")
   private String repoBasePath;
@@ -50,17 +51,18 @@ public class RepositoryUtils {
 
   private static final ObjectMapper mapper = new ObjectMapper();
 
-  // ==================== Git Utils Methods ====================
-
-  public static String extractProjectName(String repoUrl) {
+  @Override
+  public String extractProjectName(String repoUrl) {
     String[] parts = repoUrl.split("/");
     String projectNameWithGit = parts[parts.length - 1];
     return projectNameWithGit.replace(".git", "");
   }
 
+  @Override
   public void saveIndexedCommit(String repoName, String commit) {
     try {
-      Path metaFile = Paths.get(repoBasePath, repoName, ".rag-meta.json");
+      Path metaFile =
+          Paths.get(System.getProperty("user.home"), "ai-rag-repos", repoName, ".rag-meta.json");
 
       Map<String, Object> meta = new HashMap<>();
       meta.put("lastIndexedCommit", commit);
@@ -75,9 +77,11 @@ public class RepositoryUtils {
     }
   }
 
+  @Override
   public String loadIndexedCommit(String repoName) {
     try {
-      Path metaFile = Paths.get(repoBasePath, repoName, ".rag-meta.json");
+      Path metaFile =
+          Paths.get(System.getProperty("user.home"), "ai-rag-repos", repoName, ".rag-meta.json");
       if (!Files.exists(metaFile)) return null;
 
       JsonNode node = mapper.readTree(metaFile.toFile());
@@ -89,12 +93,7 @@ public class RepositoryUtils {
     }
   }
 
-  /**
-   * 同步仓库代码，拉取最新更新。如果仓库不存在，则自动注册
-   *
-   * @param ragRepoDTO 包含仓库信息的 DTO
-   * @return SyncResult 包含当前 commit 和是否有变化，如果同步失败返回 null
-   */
+  @Override
   public SyncResult syncRepository(RagRepoDTO ragRepoDTO) throws IOException {
     String repoName = ragRepoDTO.getRepoName();
     Path baseDir = Paths.get(System.getProperty("user.home"), "ai-rag-repos");
@@ -206,8 +205,7 @@ public class RepositoryUtils {
     }
   }
 
-  // ==================== Rag Utils Methods ====================
-
+  @Override
   public void indexRepositoryFiles(Path repoPath, String repoName) throws IOException {
 
     Set<String> ALLOWED =
@@ -358,8 +356,10 @@ public class RepositoryUtils {
         });
   }
 
-  public void indexRepositoryFilesIncremental(Path repoPath, String repoName, Git git)
+  @Override
+  public void indexRepositoryFilesIncremental(Path repoPath, String repoName, Object gitObj)
       throws IOException {
+    Git git = (Git) gitObj;
     // 允许索引的文件类型
     Set<String> ALLOWED =
         Set.of(
@@ -476,7 +476,7 @@ public class RepositoryUtils {
     }
   }
 
-  /** 删除指定仓库的最后索引 commit 信息，以及对应向量 */
+  @Override
   public void deleteIndexedCommit(String repoName) throws IOException {
     // 删除仓库所有向量
     Filter.Expression filter = new FilterExpressionBuilder().eq("repo", repoName).build();
@@ -484,7 +484,7 @@ public class RepositoryUtils {
     log.info("Deleted all vectors for repository {}", repoName);
   }
 
-  /** 根据代码片段返回上下文信息（检索向量库匹配片段） */
+  @Override
   public String reviewCodeContext(String repoName, String code) {
     // 1. 将代码分块
     Document doc = new Document(code);
@@ -516,19 +516,8 @@ public class RepositoryUtils {
     return String.join("\n---\n", results);
   }
 
-  /** 获取仓库的 Git tag 列表 */
+  @Override
   public List<String> getRepositoryTags(String repoName) throws IOException {
     return new ArrayList<>();
-  }
-
-  /** 同步结果类 */
-  public static class SyncResult {
-    public final String currentCommit;
-    public final boolean hasChanges;
-
-    public SyncResult(String currentCommit, boolean hasChanges) {
-      this.currentCommit = currentCommit;
-      this.hasChanges = hasChanges;
-    }
   }
 }

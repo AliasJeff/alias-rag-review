@@ -303,7 +303,7 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
         // 将 JsonNode 列表转换为 Map 列表
         List<Map<String, Object>> commentsList = new ArrayList<>();
         for (JsonNode comment : allComments) {
-            Map<String, Object> commentMap = mapper.convertValue(comment, new TypeReference<Map<String, Object>>() {
+            Map<String, Object> commentMap = mapper.convertValue(comment, new TypeReference<>() {
             });
             commentsList.add(commentMap);
         }

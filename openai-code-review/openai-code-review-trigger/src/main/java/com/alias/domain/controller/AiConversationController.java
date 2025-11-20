@@ -108,7 +108,7 @@ public class AiConversationController {
             // Validate request
             if (request.getMessage() == null || request.getMessage().isEmpty()) {
                 String errorMsg = "### ❌ 错误\n\n消息内容不能为空。\n\n";
-                emitter.send(SseEmitter.event().name("error").data(buildEmitterPayload(errorMsg, request != null ? request.getConversationId() : null)));
+                emitter.send(SseEmitter.event().name("error").data(buildEmitterPayload(errorMsg, request.getConversationId())));
                 emitter.complete();
                 return emitter;
             }
@@ -186,13 +186,13 @@ public class AiConversationController {
     @PostMapping("/chat-stream-router")
     public SseEmitter chatStreamWithRouter(@RequestBody ChatRequest request) {
 
-        SseEmitter emitter = new SseEmitter(300_000L); // 5 minutes timeout
+        SseEmitter emitter = new SseEmitter(0L);
 
         try {
             // Validate request
             if (request.getMessage() == null || request.getMessage().isEmpty()) {
                 String errorMsg = "### ❌ Error\n\nMessage content cannot be empty.\n\n";
-                emitter.send(SseEmitter.event().name("error").data(buildEmitterPayload(errorMsg, request != null ? request.getConversationId() : null)));
+                emitter.send(SseEmitter.event().name("error").data(buildEmitterPayload(errorMsg, request.getConversationId())));
                 emitter.complete();
                 return emitter;
             }
@@ -300,7 +300,7 @@ public class AiConversationController {
                                 GitCommand gitCommand = new GitCommand(githubToken);
                                 ReviewPullRequestStreamingService reviewService = new ReviewPullRequestStreamingService(gitCommand, chatClient, prSnapshotService);
                                 reviewService.setConversationId(requestForThread.getConversationId());
-                                reviewService.setClientIdentifier(parseUuidQuietly(requestForThread.getUserId()));
+                                reviewService.setClientIdentifier(UUID.fromString(requestForThread.getUserId()));
 
                                 // Parse PR URL and set parameters
                                 GitHubPrUtils.PrInfo prInfo = GitHubPrUtils.parsePrUrl(prUrl);
@@ -387,41 +387,6 @@ public class AiConversationController {
         return emitter;
     }
 
-    /**
-     * Extract repository information from request
-     * Can be from systemPrompt, conversationId, or a dedicated field
-     *
-     * @param request chat request
-     * @return repository string in format owner/repo, or null if not found
-     */
-    private String extractRepositoryFromRequest(ChatRequest request) {
-        // Try to extract from system prompt if it contains repository info
-        if (request.getSystemPrompt() != null && request.getSystemPrompt().contains("repository:")) {
-            String[] parts = request.getSystemPrompt().split("repository:");
-            if (parts.length > 1) {
-                String repo = parts[1].trim().split("\n")[0].trim();
-                if (!repo.isEmpty()) {
-                    return repo;
-                }
-            }
-        }
-
-        // Could also be extracted from conversation context or metadata
-        // For now, return null if not found
-        return null;
-    }
-
-    private UUID parseUuidQuietly(String raw) {
-        if (raw == null || raw.isEmpty()) {
-            return null;
-        }
-        try {
-            return UUID.fromString(raw);
-        } catch (IllegalArgumentException e) {
-            log.warn("Invalid UUID format for client identifier: {}", raw);
-            return null;
-        }
-    }
 
     /**
      * Build enhanced system prompt with RAG context

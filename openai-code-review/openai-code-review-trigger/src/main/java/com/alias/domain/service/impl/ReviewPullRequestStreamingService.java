@@ -8,6 +8,7 @@ import com.alias.domain.prompt.ReviewPrompts;
 import com.alias.domain.service.AbstractOpenAiCodeReviewService;
 import com.alias.domain.service.IMessageService;
 import com.alias.domain.service.IPrSnapshotService;
+import com.alias.domain.utils.ChatUtils;
 import com.alias.infrastructure.git.GitCommand;
 import com.alias.utils.*;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -674,7 +675,7 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
         if (topBuilder.length() == 0) {
             topBuilder.append("AI Code Review completed.\n\n");
         }
-        topBuilder.append("---\n\nAuthor: '@AliasJeff'\n");
+        topBuilder.append("---\n\nAuthor: @AliasJeff\n");
         String combinedTop = topBuilder.toString();
         postCommentToGithubPr(combinedTop);
 
@@ -772,20 +773,18 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
      * @return RAG context 字符串
      */
     private String getRagContext(String code) {
-        // TODO: 启用 getRagContext
-        return "";
-//        if (this.repository == null || this.repository.isEmpty()) {
-//            logger.warn("Repository is empty, cannot get RAG context");
-//            return "";
-//        }
-//
-//        logger.info("Getting RAG context via ChatUtils. repository={}, codeSize={}", this.repository, code != null ? code.length() : 0);
-//
-//        // 调用 ChatUtils 中的 getRagContext 方法
-//        String ragContext = ChatUtils.getRagContext(code, this.repository);
-//
-//        logger.info("RAG context retrieved. contextSize={}", ragContext.length());
-//        return ragContext;
+        if (this.repository == null || this.repository.isEmpty()) {
+            logger.warn("Repository is empty, cannot get RAG context");
+            return "";
+        }
+
+        logger.info("Getting RAG context via ChatUtils. repository={}, codeSize={}", this.repository, code != null ? code.length() : 0);
+
+        // 调用 ChatUtils 中的 getRagContext 方法
+        String ragContext = ChatUtils.getRagContext(code, this.repository);
+
+        logger.info("RAG context retrieved. contextSize={}", ragContext.length());
+        return ragContext;
     }
 
     private String postCommentToGithubPr(String body) throws Exception {

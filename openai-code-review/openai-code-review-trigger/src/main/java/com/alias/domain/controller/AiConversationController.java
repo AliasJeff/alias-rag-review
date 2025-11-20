@@ -298,7 +298,7 @@ public class AiConversationController {
 
                                 // Create GitCommand and ReviewPullRequestStreamingService
                                 GitCommand gitCommand = new GitCommand(githubToken);
-                                ReviewPullRequestStreamingService reviewService = new ReviewPullRequestStreamingService(gitCommand, chatClient, prSnapshotService);
+                                ReviewPullRequestStreamingService reviewService = new ReviewPullRequestStreamingService(gitCommand, chatClient, prSnapshotService, messageService);
                                 reviewService.setConversationId(requestForThread.getConversationId());
                                 reviewService.setClientIdentifier(UUID.fromString(requestForThread.getUserId()));
 

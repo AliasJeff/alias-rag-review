@@ -463,7 +463,7 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
         if (topBuilder.length() == 0) {
             topBuilder.append("AI Code Review completed.\n\n");
         }
-        topBuilder.append("---\n\nAuthor: '@AliasJeff'\n");
+        topBuilder.append("---\n\nAuthor: @AliasJeff\n");
         String combinedTop = topBuilder.toString();
         postCommentToGithubPr(combinedTop);
 

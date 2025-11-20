@@ -3,6 +3,8 @@ package com.alias.domain.controller;
 import com.alias.config.AppConfig;
 import com.alias.domain.model.*;
 import com.alias.domain.service.IAiConversationService;
+import com.alias.domain.service.IMessageService;
+import com.alias.domain.service.IPrSnapshotService;
 import com.alias.domain.service.impl.ReviewPullRequestStreamingService;
 import com.alias.domain.utils.ChatUtils;
 import com.alias.infrastructure.git.GitCommand;
@@ -36,6 +38,12 @@ public class AiConversationController {
 
     @Resource
     private ChatClient chatClient;
+
+    @Resource
+    private IPrSnapshotService prSnapshotService;
+
+    @Resource
+    private IMessageService messageService;
 
 
     @PostConstruct
@@ -94,18 +102,20 @@ public class AiConversationController {
     @PostMapping("/chat-stream")
     public SseEmitter chatStream(@RequestBody ChatRequest request) {
 
-        SseEmitter emitter = new SseEmitter(300_000L); // 5 minutes timeout
+        SseEmitter emitter = new SseEmitter(0L);
 
         try {
             // Validate request
             if (request.getMessage() == null || request.getMessage().isEmpty()) {
-                emitter.send(SseEmitter.event().name("error").data(buildEmitterPayload("Message is required", request != null ? request.getConversationId() : null)));
+                String errorMsg = "### ❌ 错误\n\n消息内容不能为空。\n\n";
+                emitter.send(SseEmitter.event().name("error").data(buildEmitterPayload(errorMsg, request != null ? request.getConversationId() : null)));
                 emitter.complete();
                 return emitter;
             }
 
             if (request.getUserId() == null || request.getUserId().isEmpty()) {
-                emitter.send(SseEmitter.event().name("error").data(buildEmitterPayload("User ID is required", request.getConversationId())));
+                String errorMsg = "### ❌ 错误\n\n用户 ID 不能为空。\n\n";
+                emitter.send(SseEmitter.event().name("error").data(buildEmitterPayload(errorMsg, request.getConversationId())));
                 emitter.complete();
                 return emitter;
             }
@@ -127,7 +137,8 @@ public class AiConversationController {
                 } catch (Exception e) {
                     log.error("Stream chat failed", e);
                     try {
-                        emitter.send(SseEmitter.event().name("error").data(buildEmitterPayload("Stream chat failed: " + e.getMessage(), requestForThread.getConversationId())));
+                        String errorMsg = "### ❌ Streaming Chat Failed\n\n" + "**Error Message:**\n" + "```\n" + e.getMessage() + "\n" + "```\n\n";
+                        emitter.send(SseEmitter.event().name("error").data(buildEmitterPayload(errorMsg, requestForThread.getConversationId())));
                     } catch (Exception ex) {
                         log.error("Error sending error event", ex);
                     } finally {
@@ -147,7 +158,8 @@ public class AiConversationController {
         } catch (Exception e) {
             log.error("Stream chat setup failed", e);
             try {
-                emitter.send(SseEmitter.event().name("error").data(buildEmitterPayload("Stream setup failed: " + e.getMessage(), request.getConversationId())));
+                String errorMsg = "### ❌ Initialization Failed\n\n" + "**Error Message:**\n" + "```\n" + e.getMessage() + "\n" + "```\n\n";
+                emitter.send(SseEmitter.event().name("error").data(buildEmitterPayload(errorMsg, request.getConversationId())));
             } catch (Exception ex) {
                 log.error("Error sending error event", ex);
             } finally {
@@ -179,13 +191,15 @@ public class AiConversationController {
         try {
             // Validate request
             if (request.getMessage() == null || request.getMessage().isEmpty()) {
-                emitter.send(SseEmitter.event().name("error").data(buildEmitterPayload("Message is required", request != null ? request.getConversationId() : null)));
+                String errorMsg = "### ❌ Error\n\nMessage content cannot be empty.\n\n";
+                emitter.send(SseEmitter.event().name("error").data(buildEmitterPayload(errorMsg, request != null ? request.getConversationId() : null)));
                 emitter.complete();
                 return emitter;
             }
 
             if (request.getUserId() == null || request.getUserId().isEmpty()) {
-                emitter.send(SseEmitter.event().name("error").data(buildEmitterPayload("User ID is required", request.getConversationId())));
+                String errorMsg = "### ❌ Error\n\nUser ID cannot be empty.\n\n";
+                emitter.send(SseEmitter.event().name("error").data(buildEmitterPayload(errorMsg, request.getConversationId())));
                 emitter.complete();
                 return emitter;
             }
@@ -203,6 +217,9 @@ public class AiConversationController {
             // Use CompletableFuture instead of new Thread
             CompletableFuture.runAsync(() -> {
                 try {
+                    // Save user message to database first
+                    saveUserMessage(requestForThread);
+
                     // Get conversation history for context
                     ChatContext context = aiConversationService.getConversationHistory(requestForThread.getConversationId());
                     String conversationHistory = context != null ? context.toString() : "";
@@ -255,7 +272,7 @@ public class AiConversationController {
                         if (prUrl == null || prUrl.isEmpty()) {
                             log.info("No PR URL found for review intent. conversationId={}", requestForThread.getConversationId());
                             try {
-                                String message = "为了提供更准确的代码审查，请提供 PR URL。";
+                                String message = "### ⚠️ Missing PR URL\n\n" + "To provide accurate code review, please provide a GitHub Pull Request URL.\n\n" + "**Example Format:**\n" + "```\n" + "https://github.com/owner/repo/pull/123\n" + "```\n\n";
                                 emitter.send(SseEmitter.event().name("message").data(buildEmitterPayload(message, requestForThread.getConversationId())));
                                 emitter.send(SseEmitter.event().name("complete").data("Streaming completed"));
                                 emitter.complete();
@@ -273,15 +290,17 @@ public class AiConversationController {
                                 log.info("Starting code review for PR. conversationId={}, prUrl={}", requestForThread.getConversationId(), prUrl);
 
                                 // Send review start event
-                                emitter.send(SseEmitter.event().name("review_start").data(buildEmitterPayload("Reviewing PR: " + prUrl + "\n", requestForThread.getConversationId())));
+                                String reviewStartMsg = "## 🔍 Starting Code Review\n\n" + "**PR URL:** " + prUrl + "\n\n" + "Analyzing code changes...\n\n";
+                                emitter.send(SseEmitter.event().name("review_start").data(buildEmitterPayload(reviewStartMsg, requestForThread.getConversationId())));
 
                                 // Get GitHub token from config
                                 String githubToken = AppConfig.getInstance().requireString("github", "token");
 
                                 // Create GitCommand and ReviewPullRequestStreamingService
                                 GitCommand gitCommand = new GitCommand(githubToken);
-                                ReviewPullRequestStreamingService reviewService = new ReviewPullRequestStreamingService(gitCommand, chatClient);
+                                ReviewPullRequestStreamingService reviewService = new ReviewPullRequestStreamingService(gitCommand, chatClient, prSnapshotService);
                                 reviewService.setConversationId(requestForThread.getConversationId());
+                                reviewService.setClientIdentifier(parseUuidQuietly(requestForThread.getUserId()));
 
                                 // Parse PR URL and set parameters
                                 GitHubPrUtils.PrInfo prInfo = GitHubPrUtils.parsePrUrl(prUrl);
@@ -296,7 +315,8 @@ public class AiConversationController {
                             } catch (Exception reviewErr) {
                                 log.error("Code review failed. conversationId={}, prUrl={}, error={}", requestForThread.getConversationId(), prUrl, reviewErr.getMessage(), reviewErr);
                                 try {
-                                    emitter.send(SseEmitter.event().name("error").data(buildEmitterPayload("Code review failed: " + reviewErr.getMessage(), requestForThread.getConversationId())));
+                                    String errorMsg = "### ❌ Code Review Failed\n\n" + "**Error Message:**\n" + "```\n" + reviewErr.getMessage() + "\n" + "```\n\n";
+                                    emitter.send(SseEmitter.event().name("error").data(buildEmitterPayload(errorMsg, requestForThread.getConversationId())));
                                 } catch (IOException ioErr) {
                                     log.error("Failed to send error event", ioErr);
                                 }
@@ -334,7 +354,8 @@ public class AiConversationController {
                 } catch (Exception e) {
                     log.error("Stream chat router failed", e);
                     try {
-                        emitter.send(SseEmitter.event().name("error").data(buildEmitterPayload("Stream chat failed: " + e.getMessage(), requestForThread.getConversationId())));
+                        String errorMsg = "### ❌ Smart Routing Failed\n\n" + "**Error Message:**\n" + "```\n" + e.getMessage() + "\n" + "```\n\n";
+                        emitter.send(SseEmitter.event().name("error").data(buildEmitterPayload(errorMsg, requestForThread.getConversationId())));
                     } catch (Exception ex) {
                         log.error("Error sending error event", ex);
                     } finally {
@@ -354,7 +375,8 @@ public class AiConversationController {
         } catch (Exception e) {
             log.error("Stream chat router setup failed", e);
             try {
-                emitter.send(SseEmitter.event().name("error").data(buildEmitterPayload("Stream setup failed: " + e.getMessage(), request.getConversationId())));
+                String errorMsg = "### ❌ Initialization Failed\n\n" + "**Error Message:**\n" + "```\n" + e.getMessage() + "\n" + "```\n\n";
+                emitter.send(SseEmitter.event().name("error").data(buildEmitterPayload(errorMsg, request.getConversationId())));
             } catch (Exception ex) {
                 log.error("Error sending error event", ex);
             } finally {
@@ -387,6 +409,18 @@ public class AiConversationController {
         // Could also be extracted from conversation context or metadata
         // For now, return null if not found
         return null;
+    }
+
+    private UUID parseUuidQuietly(String raw) {
+        if (raw == null || raw.isEmpty()) {
+            return null;
+        }
+        try {
+            return UUID.fromString(raw);
+        } catch (IllegalArgumentException e) {
+            log.warn("Invalid UUID format for client identifier: {}", raw);
+            return null;
+        }
     }
 
     /**
@@ -526,5 +560,42 @@ public class AiConversationController {
         String safeContent = content != null ? content : "";
         String safeConversationId = conversationId != null ? conversationId : "";
         return "{\"content\":\"" + escapeJson(safeContent) + "\",\"conversationId\":\"" + escapeJson(safeConversationId) + "\"}";
+    }
+
+    /**
+     * 保存用户消息到数据库
+     *
+     * @param request 聊天请求
+     */
+    private void saveUserMessage(ChatRequest request) {
+        if (messageService == null) {
+            log.debug("MessageService is not available, skipping user message save");
+            return;
+        }
+
+        if (request == null || request.getMessage() == null || request.getMessage().isEmpty()) {
+            log.debug("Message is empty, skipping user message save");
+            return;
+        }
+
+        if (request.getConversationId() == null || request.getConversationId().isEmpty()) {
+            log.debug("ConversationId is empty, skipping user message save");
+            return;
+        }
+
+        try {
+            UUID conversationUuid = UUID.fromString(request.getConversationId());
+
+            // 创建并保存用户消息
+            Message userMessage = Message.builder().conversationId(conversationUuid).role("user").type("text").content(request.getMessage()).build();
+
+            messageService.createMessage(userMessage);
+            log.debug("User message saved to database. conversationId={}", request.getConversationId());
+        } catch (IllegalArgumentException e) {
+            log.warn("Invalid conversationId format, skipping user message save. conversationId={}, err={}", request.getConversationId(), e.getMessage());
+        } catch (Exception e) {
+            log.error("Failed to save user message to database. conversationId={}, err={}", request.getConversationId(), e.getMessage(), e);
+            // 不抛出异常，避免影响主流程
+        }
     }
 }

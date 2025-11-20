@@ -199,6 +199,8 @@ public class ChatUtils {
             ObjectMapper mapper = new ObjectMapper();
             Map<String, Object> requestMap = new HashMap<>();
             requestMap.put("repoName", repoName);
+            requestMap.put("repoUrl", "https://github.com/" + repository);
+            requestMap.put("branch", "main");
             requestMap.put("code", message);
             String requestBody = mapper.writeValueAsString(requestMap);
 
@@ -208,8 +210,8 @@ public class ChatUtils {
             conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
             conn.setRequestProperty("Accept", "application/json");
             conn.setDoOutput(true);
-            conn.setConnectTimeout(10000); // 10 seconds
-            conn.setReadTimeout(30000); // 30 seconds
+            conn.setConnectTimeout(0);
+            conn.setReadTimeout(0);
 
             // Send request body
             try (OutputStream os = conn.getOutputStream()) {

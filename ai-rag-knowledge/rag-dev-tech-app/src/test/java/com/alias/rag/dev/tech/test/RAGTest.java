@@ -19,6 +19,7 @@ import org.springframework.ai.vectorstore.filter.Filter;
 import org.springframework.ai.vectorstore.filter.FilterExpressionBuilder;
 import org.springframework.ai.vectorstore.pgvector.PgVectorStore;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.test.context.junit4.SpringRunner;
 
 @Slf4j
@@ -31,7 +32,8 @@ public class RAGTest {
 
   @Test
   public void upload() {
-    TikaDocumentReader reader = new TikaDocumentReader("ai-rag-knowledge/data/file.text");
+    ClassPathResource resource = new ClassPathResource("data/file.text");
+    TikaDocumentReader reader = new TikaDocumentReader(resource);
 
     List<Document> documents = reader.get();
     List<Document> documentSplitterList = tokenTextSplitter.apply(documents);

@@ -32,19 +32,19 @@ public class PrSnapshotController {
      * @param snapshot the snapshot to create
      * @return created snapshot
      */
-    @Operation(summary = "创建PR快照", description = "为对话创建新的PR文件快照")
+    @Operation(summary = "创建PR快照", description = "为客户端创建新的PR文件快照")
     @PostMapping
     public Response<PrSnapshot> createSnapshot(@RequestBody PrSnapshot snapshot) {
         try {
-            if (snapshot.getConversationId() == null) {
-                return Response.<PrSnapshot>builder().code("4000").info("Conversation ID is required").build();
+            if (snapshot.getClientIdentifier() == null) {
+                return Response.<PrSnapshot>builder().code("4000").info("Client identifier is required").build();
             }
 
-            if (snapshot.getFilePath() == null || snapshot.getFilePath().isEmpty()) {
-                return Response.<PrSnapshot>builder().code("4000").info("File path is required").build();
+            if (snapshot.getUrl() == null || snapshot.getUrl().isEmpty()) {
+                return Response.<PrSnapshot>builder().code("4000").info("PR url is required").build();
             }
 
-            log.info("Creating PR snapshot for conversation: {}, filePath: {}", snapshot.getConversationId(), snapshot.getFilePath());
+            log.info("Creating PR snapshot for client: {}, url: {}", snapshot.getClientIdentifier(), snapshot.getUrl());
             PrSnapshot created = prSnapshotService.createSnapshot(snapshot);
 
             return Response.<PrSnapshot>builder().code("0000").info("PR snapshot created successfully").data(created).build();
@@ -79,39 +79,58 @@ public class PrSnapshotController {
     }
 
     /**
-     * Get all PR snapshots for a conversation
+     * Get all PR snapshots for a client
      *
-     * @param conversationId the conversation ID
+     * @param clientIdentifier the client identifier
      * @return list of snapshots
      */
-    @Operation(summary = "获取对话的所有PR快照", description = "获取指定对话的所有PR快照列表")
-    @GetMapping("/conversation/{conversationId}")
-    public Response<List<PrSnapshot>> getConversationSnapshots(@PathVariable("conversationId") UUID conversationId) {
+    @Operation(summary = "获取客户端的所有PR快照", description = "获取指定客户端的所有PR快照列表")
+    @GetMapping("/client/{clientIdentifier}")
+    public Response<List<PrSnapshot>> getClientSnapshots(@PathVariable("clientIdentifier") UUID clientIdentifier) {
         try {
-            log.info("Getting PR snapshots for conversation: {}", conversationId);
-            List<PrSnapshot> snapshots = prSnapshotService.getSnapshotsByConversationId(conversationId);
+            log.info("Getting PR snapshots for client: {}", clientIdentifier);
+            List<PrSnapshot> snapshots = prSnapshotService.getSnapshotsByClientIdentifier(clientIdentifier);
 
             return Response.<List<PrSnapshot>>builder().code("0000").info("Success").data(snapshots).build();
         } catch (Exception e) {
-            log.error("Failed to get conversation PR snapshots: {}", conversationId, e);
+            log.error("Failed to get client PR snapshots: {}", clientIdentifier, e);
             return Response.<List<PrSnapshot>>builder().code("5000").info("Failed: " + e.getMessage()).build();
         }
     }
 
     /**
-     * Get PR snapshot by conversation and file path
+     * Get PR snapshots by repository and PR number
      *
-     * @param conversationId the conversation ID
-     * @param filePath       the file path
+     * @param repoName repository name
+     * @param prNumber PR number
+     * @return list of snapshots
+     */
+    @Operation(summary = "按仓库与PR号获取快照", description = "根据仓库名与PR编号获取对应的快照列表")
+    @GetMapping("/repo")
+    public Response<List<PrSnapshot>> getRepoSnapshots(@RequestParam("repoName") String repoName, @RequestParam("prNumber") Integer prNumber) {
+        try {
+            log.info("Getting PR snapshots by repo: {}, prNumber: {}", repoName, prNumber);
+            List<PrSnapshot> snapshots = prSnapshotService.getSnapshotsByRepoNameAndPrNumber(repoName, prNumber);
+
+            return Response.<List<PrSnapshot>>builder().code("0000").info("Success").data(snapshots).build();
+        } catch (Exception e) {
+            log.error("Failed to get repo PR snapshots: {}#{}", repoName, prNumber, e);
+            return Response.<List<PrSnapshot>>builder().code("5000").info("Failed: " + e.getMessage()).build();
+        }
+    }
+
+    /**
+     * Get PR snapshot by PR URL
+     *
+     * @param url the PR URL
      * @return snapshot
      */
-    @Operation(summary = "根据文件路径获取快照", description = "根据对话ID和文件路径获取PR快照")
-    @GetMapping("/conversation/{conversationId}/file")
-    public Response<PrSnapshot> getSnapshotByFilePath(
-                                                      @PathVariable("conversationId") UUID conversationId, @RequestParam("filePath") String filePath) {
+    @Operation(summary = "根据PR链接获取快照", description = "根据PR唯一链接获取快照")
+    @GetMapping("/url")
+    public Response<PrSnapshot> getSnapshotByUrl(@RequestParam("url") String url) {
         try {
-            log.info("Getting PR snapshot by file path: conversationId={}, filePath={}", conversationId, filePath);
-            PrSnapshot snapshot = prSnapshotService.getSnapshotByConversationAndFilePath(conversationId, filePath);
+            log.info("Getting PR snapshot by url: {}", url);
+            PrSnapshot snapshot = prSnapshotService.getSnapshotByUrl(url);
 
             if (snapshot == null) {
                 return Response.<PrSnapshot>builder().code("4004").info("PR snapshot not found").build();
@@ -119,7 +138,7 @@ public class PrSnapshotController {
 
             return Response.<PrSnapshot>builder().code("0000").info("Success").data(snapshot).build();
         } catch (Exception e) {
-            log.error("Failed to get PR snapshot by file path: {}", conversationId, e);
+            log.error("Failed to get PR snapshot by url: {}", url, e);
             return Response.<PrSnapshot>builder().code("5000").info("Failed: " + e.getMessage()).build();
         }
     }
@@ -168,43 +187,43 @@ public class PrSnapshotController {
     }
 
     /**
-     * Delete all PR snapshots for a conversation
+     * Delete all PR snapshots for a client
      *
-     * @param conversationId the conversation ID
+     * @param clientIdentifier the client identifier
      * @return response
      */
-    @Operation(summary = "清空对话快照", description = "删除指定对话的所有PR快照")
-    @DeleteMapping("/conversation/{conversationId}")
-    public Response<String> deleteConversationSnapshots(@PathVariable("conversationId") UUID conversationId) {
+    @Operation(summary = "清空客户端快照", description = "删除指定客户端的所有PR快照")
+    @DeleteMapping("/client/{clientIdentifier}")
+    public Response<String> deleteClientSnapshots(@PathVariable("clientIdentifier") UUID clientIdentifier) {
         try {
-            log.info("Deleting all PR snapshots for conversation: {}", conversationId);
-            prSnapshotService.deleteSnapshotsByConversationId(conversationId);
+            log.info("Deleting all PR snapshots for client: {}", clientIdentifier);
+            prSnapshotService.deleteSnapshotsByClientIdentifier(clientIdentifier);
 
-            return Response.<String>builder().code("0000").info("PR snapshots deleted successfully").data(conversationId.toString()).build();
+            return Response.<String>builder().code("0000").info("PR snapshots deleted successfully").data(clientIdentifier.toString()).build();
         } catch (Exception e) {
-            log.error("Failed to delete PR snapshots: {}", conversationId, e);
+            log.error("Failed to delete PR snapshots: {}", clientIdentifier, e);
             return Response.<String>builder().code("5000").info("Failed: " + e.getMessage()).build();
         }
     }
 
     /**
-     * Search PR snapshots by file path pattern
+     * Search PR snapshots by keyword
      *
-     * @param conversationId  the conversation ID
-     * @param filePathPattern the file path pattern
+     * @param clientIdentifier the client identifier
+     * @param keyword          the keyword
      * @return list of matching snapshots
      */
-    @Operation(summary = "搜索PR快照", description = "根据文件路径模式搜索PR快照")
-    @GetMapping("/conversation/{conversationId}/search")
+    @Operation(summary = "搜索PR快照", description = "根据仓库/分支/URL关键字搜索PR快照")
+    @GetMapping("/client/{clientIdentifier}/search")
     public Response<List<PrSnapshot>> searchSnapshots(
-                                                      @PathVariable("conversationId") UUID conversationId, @RequestParam("filePathPattern") String filePathPattern) {
+                                                      @PathVariable("clientIdentifier") UUID clientIdentifier, @RequestParam("keyword") String keyword) {
         try {
-            log.info("Searching PR snapshots: conversationId={}, pattern={}", conversationId, filePathPattern);
-            List<PrSnapshot> snapshots = prSnapshotService.searchSnapshotsByFilePath(conversationId, filePathPattern);
+            log.info("Searching PR snapshots: clientIdentifier={}, keyword={}", clientIdentifier, keyword);
+            List<PrSnapshot> snapshots = prSnapshotService.searchSnapshots(clientIdentifier, keyword);
 
             return Response.<List<PrSnapshot>>builder().code("0000").info("Success").data(snapshots).build();
         } catch (Exception e) {
-            log.error("Failed to search PR snapshots: {}", conversationId, e);
+            log.error("Failed to search PR snapshots: {}", clientIdentifier, e);
             return Response.<List<PrSnapshot>>builder().code("5000").info("Failed: " + e.getMessage()).build();
         }
     }

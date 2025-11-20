@@ -9,6 +9,7 @@ import styles from "./MessageList.module.css";
 interface MessageListProps {
   messages: MessageType[];
   loading?: boolean;
+  streaming?: boolean;
 }
 
 /**
@@ -18,6 +19,7 @@ interface MessageListProps {
 export const MessageList = ({
   messages,
   loading = false,
+  streaming = false,
 }: MessageListProps) => {
   return (
     <ScrollToBottom className={styles.container}>
@@ -28,9 +30,16 @@ export const MessageList = ({
         </div>
       ) : (
         <div className={styles.messageList}>
-          {messages.map((msg) => (
-            <Message key={msg.id} message={msg} />
-          ))}
+          {messages.map((msg, index) => {
+            const isLatest = index === messages.length - 1;
+            return (
+              <Message
+                key={msg.id}
+                message={msg}
+                streaming={streaming && isLatest}
+              />
+            );
+          })}
           {loading && (
             <div className={`${styles.message} ${styles.assistant}`}>
               <div className={styles.avatar}>

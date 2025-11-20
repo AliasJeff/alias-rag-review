@@ -28,37 +28,42 @@ public class PrSnapshot implements Serializable {
     private UUID id;
 
     /**
-     * Conversation ID (references conversations.id)
+     * PR URL (unique identifier for a PR snapshot)
      */
-    private UUID conversationId;
+    private String url;
 
     /**
-     * File path in the PR
+     * Client identifier (references client_users.client_identifier)
      */
-    private String filePath;
+    private UUID clientIdentifier;
 
     /**
-     * Git diff content
+     * Repository name
      */
-    private String diff;
+    private String repoName;
 
     /**
-     * File content before changes
+     * Pull request number
      */
-    private String contentBefore;
+    private Integer prNumber;
 
     /**
-     * File content after changes
+     * Branch name
      */
-    private String contentAfter;
+    private String branch;
 
     /**
-     * Additional metadata as JSON
+     * File changes payload (JSONB)
      */
-    private Map<String, Object> metadata;
+    private Map<String, Object> fileChanges;
 
     /**
      * Creation timestamp
      */
     private LocalDateTime createdAt;
+
+    /**
+     * Update timestamp
+     */
+    private LocalDateTime updatedAt;
 }

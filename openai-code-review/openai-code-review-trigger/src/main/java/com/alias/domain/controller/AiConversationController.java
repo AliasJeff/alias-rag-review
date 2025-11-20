@@ -3,6 +3,7 @@ package com.alias.domain.controller;
 import com.alias.config.AppConfig;
 import com.alias.domain.model.*;
 import com.alias.domain.service.IAiConversationService;
+import com.alias.domain.service.IMessageService;
 import com.alias.domain.service.IPrSnapshotService;
 import com.alias.domain.service.impl.ReviewPullRequestStreamingService;
 import com.alias.domain.utils.ChatUtils;
@@ -40,6 +41,9 @@ public class AiConversationController {
 
     @Resource
     private IPrSnapshotService prSnapshotService;
+
+    @Resource
+    private IMessageService messageService;
 
 
     @PostConstruct
@@ -213,6 +217,9 @@ public class AiConversationController {
             // Use CompletableFuture instead of new Thread
             CompletableFuture.runAsync(() -> {
                 try {
+                    // Save user message to database first
+                    saveUserMessage(requestForThread);
+
                     // Get conversation history for context
                     ChatContext context = aiConversationService.getConversationHistory(requestForThread.getConversationId());
                     String conversationHistory = context != null ? context.toString() : "";
@@ -553,5 +560,42 @@ public class AiConversationController {
         String safeContent = content != null ? content : "";
         String safeConversationId = conversationId != null ? conversationId : "";
         return "{\"content\":\"" + escapeJson(safeContent) + "\",\"conversationId\":\"" + escapeJson(safeConversationId) + "\"}";
+    }
+
+    /**
+     * 保存用户消息到数据库
+     *
+     * @param request 聊天请求
+     */
+    private void saveUserMessage(ChatRequest request) {
+        if (messageService == null) {
+            log.debug("MessageService is not available, skipping user message save");
+            return;
+        }
+
+        if (request == null || request.getMessage() == null || request.getMessage().isEmpty()) {
+            log.debug("Message is empty, skipping user message save");
+            return;
+        }
+
+        if (request.getConversationId() == null || request.getConversationId().isEmpty()) {
+            log.debug("ConversationId is empty, skipping user message save");
+            return;
+        }
+
+        try {
+            UUID conversationUuid = UUID.fromString(request.getConversationId());
+
+            // 创建并保存用户消息
+            Message userMessage = Message.builder().conversationId(conversationUuid).role("user").type("text").content(request.getMessage()).build();
+
+            messageService.createMessage(userMessage);
+            log.debug("User message saved to database. conversationId={}", request.getConversationId());
+        } catch (IllegalArgumentException e) {
+            log.warn("Invalid conversationId format, skipping user message save. conversationId={}, err={}", request.getConversationId(), e.getMessage());
+        } catch (Exception e) {
+            log.error("Failed to save user message to database. conversationId={}, err={}", request.getConversationId(), e.getMessage(), e);
+            // 不抛出异常，避免影响主流程
+        }
     }
 }

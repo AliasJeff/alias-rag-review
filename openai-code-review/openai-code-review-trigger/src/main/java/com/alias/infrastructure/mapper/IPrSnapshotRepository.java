@@ -16,30 +16,30 @@ import java.util.UUID;
 public interface IPrSnapshotRepository {
 
     /**
-     * Save or update a PR snapshot
+     * Save or update a PR snapshot based on (url, client_identifier)
      *
      * @param snapshot the snapshot to save
      * @return number of rows affected
      */
     @Insert("""
-            INSERT INTO pr_snapshots (id, url, client_identifier, repo_name, pr_number, branch, file_changes, created_at, updated_at)
-            VALUES (#{id, javaType=java.util.UUID, jdbcType=OTHER},
-                    #{url, jdbcType=VARCHAR},
-                    #{clientIdentifier, javaType=java.util.UUID, jdbcType=OTHER},
-                    #{repoName, jdbcType=VARCHAR},
-                    #{prNumber, jdbcType=INTEGER},
-                    #{branch, jdbcType=VARCHAR},
-                    #{fileChanges, jdbcType=OTHER, typeHandler=com.alias.infrastructure.typehandler.JsonbTypeHandler},
-                    #{createdAt, jdbcType=TIMESTAMP},
-                    #{updatedAt, jdbcType=TIMESTAMP})
-            ON CONFLICT (id) DO UPDATE SET
-                url = EXCLUDED.url,
-                client_identifier = EXCLUDED.client_identifier,
-                repo_name = EXCLUDED.repo_name,
-                pr_number = EXCLUDED.pr_number,
-                branch = EXCLUDED.branch,
-                file_changes = EXCLUDED.file_changes,
-                updated_at = CURRENT_TIMESTAMP
+                    INSERT INTO pr_snapshots (id, url, client_identifier, repo_name, pr_number, branch, file_changes, created_at, updated_at)
+                    VALUES (
+                            #{id, javaType=java.util.UUID, jdbcType=OTHER},
+                            #{url, jdbcType=VARCHAR},
+                            #{clientIdentifier, javaType=java.util.UUID, jdbcType=OTHER},
+                            #{repoName, jdbcType=VARCHAR},
+                            #{prNumber, jdbcType=INTEGER},
+                            #{branch, jdbcType=VARCHAR},
+                            #{fileChanges, jdbcType=OTHER, typeHandler=com.alias.infrastructure.typehandler.JsonbTypeHandler},
+                            #{createdAt, jdbcType=TIMESTAMP},
+                            #{updatedAt, jdbcType=TIMESTAMP}
+                    )
+                    ON CONFLICT (url, client_identifier) DO UPDATE SET
+                        repo_name = EXCLUDED.repo_name,
+                        pr_number = EXCLUDED.pr_number,
+                        branch = EXCLUDED.branch,
+                        file_changes = EXCLUDED.file_changes,
+                        updated_at = CURRENT_TIMESTAMP
             """)
     int save(PrSnapshot snapshot);
 

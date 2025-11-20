@@ -1,10 +1,12 @@
 package com.alias.domain.service.impl;
 
 import com.alias.config.AppConfig;
+import com.alias.domain.model.Message;
 import com.alias.domain.model.ModelEnum;
 import com.alias.domain.model.PrSnapshot;
 import com.alias.domain.prompt.ReviewPrompts;
 import com.alias.domain.service.AbstractOpenAiCodeReviewService;
+import com.alias.domain.service.IMessageService;
 import com.alias.domain.service.IPrSnapshotService;
 import com.alias.domain.utils.ChatUtils;
 import com.alias.infrastructure.git.GitCommand;
@@ -45,16 +47,22 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
 
     private ChatClient chatClient;
     private final IPrSnapshotService prSnapshotService;
+    private final IMessageService messageService;
     private UUID clientIdentifier;
 
     public ReviewPullRequestStreamingService(GitCommand gitCommand, ChatClient chatClient) {
-        this(gitCommand, chatClient, null);
+        this(gitCommand, chatClient, null, null);
     }
 
     public ReviewPullRequestStreamingService(GitCommand gitCommand, ChatClient chatClient, IPrSnapshotService prSnapshotService) {
+        this(gitCommand, chatClient, prSnapshotService, null);
+    }
+
+    public ReviewPullRequestStreamingService(GitCommand gitCommand, ChatClient chatClient, IPrSnapshotService prSnapshotService, IMessageService messageService) {
         super(gitCommand, null);
         this.chatClient = chatClient;
         this.prSnapshotService = prSnapshotService;
+        this.messageService = messageService;
         this.model = ModelEnum.GPT_4O.getCode(); // 默认模型
     }
 
@@ -125,11 +133,18 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
             // 获取 diff
             String diffCode = getDiffCode();
 
-            // 流式进行代码审查
-            codeReviewStreaming(diffCode, emitter);
+            // 流式进行代码审查，获取整合后的review结果
+            String mergedReviewJson = codeReviewStreaming(diffCode, emitter);
 
-            // 记录审查结果（同步）
-            // 注意：这里需要先完成流式审查，再记录结果
+            // 记录审查结果到 GitHub PR
+            logger.info("Recording review results to GitHub PR");
+            String recordedUrl = recordCodeReview(mergedReviewJson);
+            logger.info("Review results recorded to GitHub PR. url={}", recordedUrl);
+
+            // 保存 message 到数据库
+            saveReviewMessage(mergedReviewJson);
+
+            // 发送完成事件
             emitter.send(SseEmitter.event().name("complete").data("Streaming completed"));
             emitter.complete();
 
@@ -176,9 +191,10 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
      *
      * @param diffCode 代码差异
      * @param emitter  SSE 发射器
+     * @return 整合后的review结果JSON字符串
      * @throws Exception 如果审查失败
      */
-    private void codeReviewStreaming(String diffCode, SseEmitter emitter) throws Exception {
+    private String codeReviewStreaming(String diffCode, SseEmitter emitter) throws Exception {
         logger.info("Submitting diff to LLM for streaming review. model={}, diffSize={}", this.model != null ? this.model : ModelEnum.GPT_4O.getCode(), diffCode != null ? diffCode.length() : 0);
         final int MAX_PROMPT_CHARS = 180_000;
         String safeDiff = diffCode == null ? "" : diffCode;
@@ -197,7 +213,9 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
             logger.warn("No files found in diff, returning empty review");
             String emptyMsg = "### ℹ️ No Code Changes Detected\n\n" + "No code file changes detected in the current PR.\n\n";
             emitter.send(SseEmitter.event().name("review").data(buildEmitterPayload(emptyMsg)));
-            return;
+            // 返回空的review结果JSON
+            Map<String, Object> emptyReview = createEmptyReview();
+            return mapper.writeValueAsString(emptyReview);
         }
 
         persistSnapshotAsync(files);
@@ -323,6 +341,11 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
         logger.info("Completed per-file streaming review. totalFiles={}, overallScore={}, totalComments={}", files.size(), overallScore, allComments.size());
         String completeMsg = "\n---\n\n✅ **Review Complete** | Files: " + files.size() + " | Score: " + overallScore + " | Comments: " + allComments.size() + "\n\n";
         emitter.send(SseEmitter.event().name("review_complete").data(buildEmitterPayload(completeMsg)));
+
+        // 将整合后的review结果序列化为JSON字符串并返回
+        String mergedReviewJson = mapper.writeValueAsString(mergedReview);
+        logger.debug("Merged review JSON generated. size={}", mergedReviewJson.length());
+        return mergedReviewJson;
     }
 
     private void persistSnapshotAsync(List<VCSUtils.FileChanges> files) {
@@ -517,7 +540,34 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
                 for (ReviewComment rc : rankedComments) {
                     ordered.add(rc.comment);
                 }
-                createPullRequestReview(commitSha, "AI Code Review inline comments", ordered);
+                // GitHub API 限制每次请求最多 10 个 inline comments，需要分批发送
+                final int MAX_COMMENTS_PER_BATCH = 10;
+                int totalComments = ordered.size();
+                if (totalComments <= MAX_COMMENTS_PER_BATCH) {
+                    createPullRequestReview(commitSha, "AI Code Review inline comments", ordered);
+                } else {
+                    logger.info("Comments count ({}) exceeds batch limit ({}), splitting into batches", totalComments, MAX_COMMENTS_PER_BATCH);
+                    int batchNumber = 1;
+                    int totalBatches = (totalComments + MAX_COMMENTS_PER_BATCH - 1) / MAX_COMMENTS_PER_BATCH;
+                    for (int i = 0; i < ordered.size(); i += MAX_COMMENTS_PER_BATCH) {
+                        int end = Math.min(i + MAX_COMMENTS_PER_BATCH, ordered.size());
+                        List<ReviewCommentDetail> batch = ordered.subList(i, end);
+                        String batchBody = String.format("AI Code Review inline comments (Batch %d/%d)", batchNumber, totalBatches);
+                        createPullRequestReview(commitSha, batchBody, batch);
+                        logger.info("Sent batch {}/{} with {} comments", batchNumber, totalBatches, batch.size());
+                        batchNumber++;
+                        // 如果不是最后一批，等待 3 秒以避免 API 速率限制
+                        if (batchNumber <= totalBatches) {
+                            try {
+                                Thread.sleep(3000);
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                                logger.warn("Interrupted while waiting between batches", e);
+                                throw new RuntimeException("Interrupted while waiting between batches", e);
+                            }
+                        }
+                    }
+                }
             }
         }
         return prUrl;
@@ -670,6 +720,75 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
         }
         int start = Math.max(parts.size() - 3, 0);
         return String.join("/", parts.subList(start, parts.size()));
+    }
+
+    /**
+     * 保存 review 结果到数据库
+     *
+     * @param reviewJson review 结果的 JSON 字符串
+     */
+    private void saveReviewMessage(String reviewJson) {
+        if (messageService == null) {
+            logger.debug("MessageService is not available, skipping message save");
+            return;
+        }
+
+        if (conversationId == null || conversationId.isEmpty()) {
+            logger.debug("ConversationId is empty, skipping message save");
+            return;
+        }
+
+        try {
+            UUID conversationUuid = UUID.fromString(conversationId);
+
+            // 构建 message 内容，包含 review 摘要信息
+            ObjectMapper mapper = new ObjectMapper();
+            JsonNode reviewNode;
+            try {
+                reviewNode = mapper.readTree(reviewJson);
+            } catch (Exception e) {
+                logger.warn("Failed to parse review JSON for message, using raw content. err={}", e.toString());
+                reviewNode = null;
+            }
+
+            StringBuilder contentBuilder = new StringBuilder();
+            if (reviewNode != null) {
+                Integer score = ReviewJsonUtils.safeInt(reviewNode, "overall_score");
+                String summary = ReviewJsonUtils.safeText(reviewNode, "summary");
+                String general = ReviewJsonUtils.safeText(reviewNode, "general_review");
+
+                if (score != null) {
+                    contentBuilder.append("### Overall Score: ").append(score).append("/100\n\n");
+                }
+                if (summary != null && !summary.isEmpty()) {
+                    contentBuilder.append("### Summary\n\n").append(summary).append("\n\n");
+                }
+                if (general != null && !general.isEmpty()) {
+                    contentBuilder.append("### General Review\n\n").append(general).append("\n\n");
+                }
+            } else {
+                // 如果无法解析 JSON，使用原始内容
+                contentBuilder.append(reviewJson);
+            }
+
+            // 构建 metadata
+            Map<String, Object> metadata = new HashMap<>();
+            metadata.put("pr_url", this.prUrl);
+            metadata.put("repository", this.repository);
+            metadata.put("pr_number", this.prNumber);
+            metadata.put("model", this.model);
+
+            // 创建并保存 message
+            Message message = Message.builder().conversationId(conversationUuid).role("assistant").type("code_review").content(contentBuilder.toString()).metadata(metadata).build();
+
+            messageService.createMessage(message);
+            logger.info("Review message saved to database. conversationId={}", conversationId);
+        } catch (IllegalArgumentException e) {
+            logger.warn("Invalid conversationId format, skipping message save. conversationId={}, err={}", conversationId, e.getMessage());
+        } catch (Exception e) {
+            logger.error("Failed to save review message to database. conversationId={}, err={}", conversationId, e.getMessage(), e);
+            // 不抛出异常，避免影响主流程
+        }
     }
 
     private static final class ReviewCommentDetail {

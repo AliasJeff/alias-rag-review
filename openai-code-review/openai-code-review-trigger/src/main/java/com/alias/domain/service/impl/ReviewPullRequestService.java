@@ -398,7 +398,34 @@ public class ReviewPullRequestService extends AbstractOpenAiCodeReviewService {
                 for (RankedReviewComment rc : rankedComments) {
                     ordered.add(rc.comment);
                 }
-                createPullRequestReview(commitSha, "AI Code Review inline comments", ordered);
+                // GitHub API 限制每次请求最多 100 个 inline comments，需要分批发送
+                final int MAX_COMMENTS_PER_BATCH = 100;
+                int totalComments = ordered.size();
+                if (totalComments <= MAX_COMMENTS_PER_BATCH) {
+                    createPullRequestReview(commitSha, "AI Code Review inline comments", ordered);
+                } else {
+                    logger.info("Comments count ({}) exceeds batch limit ({}), splitting into batches", totalComments, MAX_COMMENTS_PER_BATCH);
+                    int batchNumber = 1;
+                    int totalBatches = (totalComments + MAX_COMMENTS_PER_BATCH - 1) / MAX_COMMENTS_PER_BATCH;
+                    for (int i = 0; i < ordered.size(); i += MAX_COMMENTS_PER_BATCH) {
+                        int end = Math.min(i + MAX_COMMENTS_PER_BATCH, ordered.size());
+                        List<ReviewComment> batch = ordered.subList(i, end);
+                        String batchBody = String.format("AI Code Review inline comments (Batch %d/%d)", batchNumber, totalBatches);
+                        createPullRequestReview(commitSha, batchBody, batch);
+                        logger.info("Sent batch {}/{} with {} comments", batchNumber, totalBatches, batch.size());
+                        batchNumber++;
+                        // 如果不是最后一批，等待 3 秒以避免 API 速率限制
+                        if (batchNumber <= totalBatches) {
+                            try {
+                                Thread.sleep(3000);
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                                logger.warn("Interrupted while waiting between batches", e);
+                                throw new RuntimeException("Interrupted while waiting between batches", e);
+                            }
+                        }
+                    }
+                }
             }
         }
         return prUrl;

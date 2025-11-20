@@ -78,7 +78,9 @@ CREATE TABLE IF NOT EXISTS pr_snapshots (
     file_changes JSONB DEFAULT '{}'::jsonb,
 
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT unique_url_client UNIQUE (url, client_identifier)
 );
 
 
@@ -93,12 +95,6 @@ CREATE INDEX IF NOT EXISTS idx_conversations_pr_url
 
 CREATE INDEX IF NOT EXISTS idx_messages_conversation_id
     ON messages(conversation_id);
-
-CREATE INDEX IF NOT EXISTS idx_pr_snapshots_conversation_id
-    ON pr_snapshots(conversation_id);
-
-CREATE INDEX IF NOT EXISTS idx_pr_snapshots_file_path
-    ON pr_snapshots USING gin (file_path gin_trgm_ops);
 
 
 -- ===========================================================

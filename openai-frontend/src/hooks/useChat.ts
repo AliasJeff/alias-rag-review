@@ -157,31 +157,18 @@ export const useChat = (options: UseChatOptions) => {
             .chatStream(
               request,
               (chunk: string) => {
-                // Handle chunk callback - chunk is JSON string
+                let data: any = null;
+
+                // 尝试解析 JSON
                 try {
-                  const data = JSON.parse(chunk);
+                  data = JSON.parse(chunk);
+                } catch (_) {
+                  // 不是 JSON，作为普通文本处理
+                  const text = chunk.trim();
+                  if (text.length > 0) {
+                    fullContent += text;
+                    onChunk?.(text);
 
-                  if (data.conversationId) {
-                    newConversationId = data.conversationId;
-                    if (!conversationId) {
-                      setConversationId(data.conversationId);
-                      // Update conversation ID in messages
-                      setMessages((prev) =>
-                        prev.map((msg) =>
-                          msg.id === userMessageId ||
-                          msg.id === assistantMessageId
-                            ? { ...msg, conversationId: data.conversationId }
-                            : msg
-                        )
-                      );
-                    }
-                  }
-
-                  if (data.content) {
-                    fullContent += data.content;
-                    onChunk?.(data.content);
-
-                    // Update assistant message with new content
                     setMessages((prev) =>
                       prev.map((msg) =>
                         msg.id === assistantMessageId
@@ -190,8 +177,39 @@ export const useChat = (options: UseChatOptions) => {
                       )
                     );
                   }
-                } catch (err) {
-                  console.error("Failed to parse chunk:", err, "chunk:", chunk);
+                  return; // 非 JSON 情况处理完，结束
+                }
+
+                // ===== JSON 情况 =====
+
+                // 处理 conversationId
+                if (data.conversationId) {
+                  newConversationId = data.conversationId;
+                  if (!conversationId) {
+                    setConversationId(data.conversationId);
+                    setMessages((prev) =>
+                      prev.map((msg) =>
+                        msg.id === userMessageId ||
+                        msg.id === assistantMessageId
+                          ? { ...msg, conversationId: data.conversationId }
+                          : msg
+                      )
+                    );
+                  }
+                }
+
+                // 处理 content 字段
+                if (data.content) {
+                  fullContent += data.content;
+                  onChunk?.(data.content);
+
+                  setMessages((prev) =>
+                    prev.map((msg) =>
+                      msg.id === assistantMessageId
+                        ? { ...msg, content: fullContent }
+                        : msg
+                    )
+                  );
                 }
               },
               (error: string) => {

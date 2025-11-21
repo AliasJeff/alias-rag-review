@@ -77,18 +77,27 @@ export const chatApi = {
           for (const line of lines) {
             // 只处理 data 行
             if (line.startsWith("data:")) {
-              const jsonStr = line.substring(5);
+              const jsonStr = line.substring(5).trim();
+
+              // 特殊结束标记
               if (jsonStr === "Streaming completed") {
                 onComplete?.();
-                break;
+                continue;
               }
+
+              // 尝试解析 JSON
+              let parsed: { content?: string } | null = null;
               try {
-                const data = JSON.parse(jsonStr);
-                if (data.content) {
-                  onChunk?.(JSON.stringify(data));
-                }
-              } catch (e) {
-                console.error("Failed to parse SSE data:", e, jsonStr);
+                parsed = JSON.parse(jsonStr);
+              } catch (_) {
+                // 如果不是 JSON，直接作为普通文本处理
+                onChunk?.(jsonStr);
+                continue;
+              }
+
+              // 有 content 字段时再处理
+              if (parsed && parsed.content) {
+                onChunk?.(JSON.stringify(parsed));
               }
             }
           }

@@ -698,7 +698,7 @@ public class RAGServiceImpl implements IRAGService {
         aggregatedTokens);
 
     int stageTwoTopK =
-        candidateIds.size() < 5 ? candidateIds.size() : Math.min(10, candidateIds.size());
+        candidateIds.size() < 5 ? candidateIds.size() : Math.min(20, candidateIds.size());
     int effectiveTopK = stageTwoTopK == 0 ? candidateIds.size() : stageTwoTopK;
     List<Document> stageTwoMatches =
         pgVectorStore.similaritySearch(
@@ -720,7 +720,7 @@ public class RAGServiceImpl implements IRAGService {
     }
 
     // 阶段 3：rerank + 过滤低相关
-    final double scoreThreshold = 0.45d;
+    final double scoreThreshold = 0.1d;
     log.info(
         "[reviewCodeContext][phase-3] repo={} threshold={} beforeRerank={}",
         repoName,

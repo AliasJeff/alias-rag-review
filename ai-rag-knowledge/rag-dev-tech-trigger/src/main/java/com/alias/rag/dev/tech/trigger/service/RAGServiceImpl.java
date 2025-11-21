@@ -601,7 +601,7 @@ public class RAGServiceImpl implements IRAGService {
   private record CodeBlockMarker(int start, String label) {}
 
   @Override
-  public void deleteIndexedCommit(String repoName) throws IOException {
+  public void deleteIndexedCommit(String repoName) {
     // 删除仓库所有向量
     Filter.Expression filter = new FilterExpressionBuilder().eq("repo", repoName).build();
     pgVectorStore.delete(filter);
@@ -635,7 +635,7 @@ public class RAGServiceImpl implements IRAGService {
       SearchRequest request =
           SearchRequest.builder()
               .query(chunkText)
-              .topK(12)
+              .topK(18)
               .filterExpression(stageOneFilter)
               .build();
       List<Document> matched = pgVectorStore.similaritySearch(request);
@@ -697,9 +697,8 @@ public class RAGServiceImpl implements IRAGService {
         aggregatedQuery.length(),
         aggregatedTokens);
 
-    int stageTwoTopK =
-        candidateIds.size() < 5 ? candidateIds.size() : Math.min(20, candidateIds.size());
-    int effectiveTopK = stageTwoTopK == 0 ? candidateIds.size() : stageTwoTopK;
+    int effectiveTopK = Math.min(20, candidateIds.size());
+    log.info("[reviewCodeContext][phase-2] repo={} effectiveTopK={}", repoName, effectiveTopK);
     List<Document> stageTwoMatches =
         pgVectorStore.similaritySearch(
             SearchRequest.builder()
@@ -762,7 +761,7 @@ public class RAGServiceImpl implements IRAGService {
   }
 
   @Override
-  public List<String> getRepositoryTags(String repoName) throws IOException {
+  public List<String> getRepositoryTags(String repoName) {
     return new ArrayList<>();
   }
 

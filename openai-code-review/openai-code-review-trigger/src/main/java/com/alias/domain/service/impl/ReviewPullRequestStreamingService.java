@@ -222,6 +222,8 @@ public class ReviewPullRequestStreamingService extends AbstractOpenAiCodeReviewS
 
         // 获取 RAG context
         String ragContext = getRagContext(safeDiff);
+        logger.info("RAG context retrieved. contextSize={}", ragContext.length());
+        logger.debug("RAG context: {}", ragContext);
         String ragMsg = "🧠 **RAG Context Loaded** (Size: " + (ragContext != null ? ragContext.length() : 0) + " characters)\n\n";
         emitter.send(SseEmitter.event().name("rag_context_success").data(buildEmitterPayload(ragMsg)));
 

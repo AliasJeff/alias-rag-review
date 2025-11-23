@@ -5,10 +5,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.*;
+import java.io.IOException;
+import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class GitCommand {
 
@@ -21,13 +24,41 @@ public class GitCommand {
     }
 
     public String getPrDiff(String prUrl) throws IOException {
-        // 直接请求 GitHub API 的 .diff 接口
-        if (!prUrl.endsWith(".diff")) {
-            if (prUrl.endsWith("/")) prUrl = prUrl.substring(0, prUrl.length() - 1);
-            prUrl = prUrl + ".diff";
+//        // 直接请求 GitHub API 的 .diff 接口
+//        if (!prUrl.endsWith(".diff")) {
+//            if (prUrl.endsWith("/")) prUrl = prUrl.substring(0, prUrl.length() - 1);
+//            prUrl = prUrl + ".diff";
+//        }
+//
+//        URL url = new URL(prUrl);
+//        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+//        conn.setRequestProperty("Authorization", "token " + githubToken);
+//        conn.setRequestProperty("Accept", "application/vnd.github.v3.diff");
+//
+//        int status = conn.getResponseCode();
+//        if (status != 200) {
+//            throw new IOException("GitHub API request failed: " + status + " " + conn.getResponseMessage());
+//        }
+//
+//        try (InputStream in = conn.getInputStream()) {
+//            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+//        }
+        // 解析 owner / repo / number
+        Pattern pattern = Pattern.compile("github\\.com/([^/]+)/([^/]+)/pull/(\\d+)");
+        Matcher m = pattern.matcher(prUrl);
+        if (!m.find()) {
+            throw new IllegalArgumentException("Invalid PR URL: " + prUrl);
         }
 
-        URL url = new URL(prUrl);
+        String owner = m.group(1);
+        String repo = m.group(2);
+        String number = m.group(3);
+
+        String apiUrl = String.format(
+                "https://api.github.com/repos/%s/%s/pulls/%s", owner, repo, number
+        );
+
+        URL url = new URL(apiUrl);
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestProperty("Authorization", "token " + githubToken);
         conn.setRequestProperty("Accept", "application/vnd.github.v3.diff");
@@ -44,7 +75,7 @@ public class GitCommand {
 
     /**
      * Get the head commit SHA for a PR via GitHub API.
-     * 
+     *
      * @param repository Repository in format "owner/repo"
      * @param prNumber   PR number as string
      * @return The head commit SHA of the PR
